@@ -579,8 +579,8 @@ alt_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_tot
                                                      n_folds = 3 , n_repeats = 5,
                                                      n_cores = 8,
                                                      max_genes = 20,
-                                                     pivot_genes = c(TERT = "DOWN", CAB39L = "UP",
-                                                                     SUV39H1 = "DOWN"),
+                                                     pivot_genes = c(LINC01783 = "UP", LMNTD2 = "UP",
+                                                                     CCNB3 = "UP"),
                                                      n_pivots    = 3L,
                                                      lcb_conf   = 0.95,
                                                      lcb_boot_R = 500,
@@ -593,3 +593,234 @@ alt_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_tot
 #####################################################################################
 
 # Taking only upregulated genes -- starting with random forest.
+
+# Running RF multiple times for stability.
+
+seeds <- c(49, 77, 123, 134, 531, 424, 636, 4562, 46464, 55443)
+top_n_threshold <- 20
+importance_list <- list()
+
+
+sample_sizes <- c(
+  "NO_TMM" = 12,
+  "ALT"    = 6,
+  "Telomerase-Amplified" = 6,
+  "Telomerase-NotAmplified" = 6
+)
+
+candidate_genes_tmm_combined_up <- candidate_genes_tmm_combined_up[candidate_genes_tmm_combined_up %in% rownames(lcpm)]
+
+for (i in seq_along(seeds)) {
+  set.seed(seeds[i])
+  rf <- randomForest(
+    x = t(lcpm[candidate_genes_tmm_combined_up, ]),
+    y = as.factor(train_metadata$TMM_Case),
+    sampsize   = sample_sizes,
+    strata     = train_metadata$TMM,
+    ntree = 1500,
+    importance = TRUE
+  )
+  imp <- as.data.frame(importance(rf))
+  imp$gene <- rownames(imp)
+  imp_seed_id <- i
+  imp$rank_in_accuracy <- rank(-imp$MeanDecreaseAccuracy)
+  imp$rank_in_Gini <- rank(-imp$MeanDecreaseGini)
+  importance_list[[i]] <- imp
+}
+
+
+# Data Fusion & Consistency Calculation
+all_seed_data <- bind_rows(importance_list)
+
+# Summarize metrics across all seeds
+stability_metrics <- all_seed_data %>%
+  group_by(gene) %>%
+  summarise(
+    # Core Averages
+    mean_accuracy = mean(MeanDecreaseAccuracy),
+    mean_gini     = mean(MeanDecreaseGini),
+    mean_no_tmm   = mean(NO_TMM),
+    mean_tmm      = mean(TMM),
+    
+    # Stability/Consistency Metrics.
+    seeds_present_in_top = sum(rank_in_accuracy <= top_n_threshold & rank_in_Gini <= top_n_threshold ),
+    avg_accuracy_rank_in_seeds    = mean(rank_in_accuracy),
+    avg_rank_in_Gini_in_seeds = mean(rank_in_Gini)
+  ) %>%
+  # Quality filter: must have positive importance and valid contribution.
+  filter(mean_no_tmm > 0, mean_tmm > 0, mean_accuracy > quantile(mean_accuracy, 0.50)) %>%
+  arrange(desc(mean_accuracy)) %>%
+  mutate(gene_index = row_number())
+
+
+# Visualization: Stability vs. Magnitude
+p7 <- ggplot(stability_metrics, aes(x = seeds_present_in_top, y = mean_accuracy)) +
+  geom_jitter(width = 0.2, alpha = 0.5, color = "#2E86AB") +
+  geom_text_repel(
+    data = subset(stability_metrics, seeds_present_in_top >= 8),
+    aes(label = gene),
+    size = 4.5,
+    max.overlaps = 20
+  ) +
+  labs(
+    title = "Consistency Selection (Top 20 across Seeds)",
+    x = paste0(
+      "Times in Top ", top_n_threshold,
+      " (out of ", length(seeds), " seeds)"
+    ),
+    y = "Average Mean Decrease Accuracy"
+  ) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 16, face = "bold"),
+    axis.title.y = element_text(size = 16, face = "bold"),
+    axis.text.x  = element_text(size = 14),
+    axis.text.y  = element_text(size = 14)
+  )
+
+# Top 20 Lollipop Plot
+top_20_tmm <- stability_metrics %>% slice_head(n = 20)
+
+p8 <- ggplot(top_20_tmm, aes(x = reorder(gene, mean_accuracy), y = mean_accuracy)) +
+  geom_segment(aes(xend = gene, y = 0, yend = mean_accuracy), linewidth = 0.6) +
+  geom_point(size = 4, color = "#2E86AB") +
+  coord_flip() +
+  labs(title = "Top 20 Pivot Genes (Averaged)", x = NULL, y = "Mean Decrease Accuracy") +
+  theme_classic()
+
+print(p7)
+print(p8)
+
+# Step 2: Random Forest: first for ALT.
+
+seeds <- c(49, 77, 123, 134, 531, 424, 636, 4562, 46464, 55443)
+top_n_threshold <- 20
+importance_list <- list()
+
+
+sample_sizes <- c(
+  "NO_TMM" = 6,
+  "ALT"    = 12,
+  "Telomerase-Amplified" = 6,
+  "Telomerase-NotAmplified" = 6
+)
+
+candidate_genes_alt_combined_up <- candidate_genes_alt_combined_up[candidate_genes_alt_combined_up %in% rownames(lcpm)]
+
+for (i in seq_along(seeds)) {
+  set.seed(seeds[i])
+  rf <- randomForest(
+    x = t(lcpm[candidate_genes_alt_combined_up, ]),
+    y = as.factor(train_metadata$ALT_Case),
+    sampsize   = sample_sizes,
+    strata     = train_metadata$TMM,
+    ntree = 1500,
+    importance = TRUE
+  )
+  imp <- as.data.frame(importance(rf))
+  imp$gene <- rownames(imp)
+  imp_seed_id <- i
+  imp$rank_in_accuracy <- rank(-imp$MeanDecreaseAccuracy)
+  imp$rank_in_Gini <- rank(-imp$MeanDecreaseGini)
+  importance_list[[i]] <- imp
+}
+
+
+# Data Fusion & Consistency Calculation
+all_seed_data2 <- bind_rows(importance_list)
+
+# Summarize metrics across all seeds
+stability_metrics2 <- all_seed_data2 %>%
+  group_by(gene) %>%
+  summarise(
+    # Core Averages
+    mean_accuracy = mean(MeanDecreaseAccuracy),
+    mean_gini     = mean(MeanDecreaseGini),
+    mean_alt   = mean(ALT),
+    mean_nonalt      = mean(`Non-ALT`),
+    
+    # Stability/Consistency Metrics.
+    seeds_present_in_top = sum(rank_in_accuracy <= top_n_threshold & rank_in_Gini <= top_n_threshold),
+    avg_accuracy_rank_in_seeds = mean(rank_in_accuracy),
+    avg_Gini_rank_in_seeds = mean(rank_in_Gini)
+  ) %>%
+  # Quality filter: must have positive importance and valid contribution.
+  filter(mean_alt > 0, mean_nonalt > 0, mean_accuracy > quantile(mean_accuracy, 0.50)) %>%
+  arrange(desc(mean_accuracy)) %>%
+  mutate(gene_index = row_number())
+
+
+# Visualization: Stability vs. Magnitude
+p9 <- ggplot(stability_metrics2, aes(x = seeds_present_in_top, y = mean_accuracy)) +
+  geom_jitter(width = 0.2, alpha = 0.5, color = "#2E86AB") +
+  geom_text_repel(
+    data = subset(stability_metrics2, seeds_present_in_top >= 10),
+    aes(label = gene),
+    size = 4.5,
+    max.overlaps = 20
+  ) +
+  labs(
+    title = "Consistency Selection (Top 20 across Seeds)",
+    x = paste0(
+      "Times in Top ", top_n_threshold,
+      " (out of ", length(seeds), " seeds)"
+    ),
+    y = "Average Mean Decrease Accuracy"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title   = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title.x = element_text(size = 16, face = "bold"),
+    axis.title.y = element_text(size = 16, face = "bold"),
+    axis.text.x  = element_text(size = 12),
+    axis.text.y  = element_text(size = 12)
+  )
+
+# Top 20 Lollipop Plot
+top_20_alt <- stability_metrics2 %>% slice_head(n = 20)
+
+p10 <- ggplot(top_20_alt, aes(x = reorder(gene, mean_accuracy), y = mean_accuracy)) +
+  geom_segment(aes(xend = gene, y = 0, yend = mean_accuracy), linewidth = 0.6) +
+  geom_point(size = 4, color = "#2E86AB") +
+  coord_flip() +
+  labs(title = "Top 20 Pivot Genes (Averaged)", x = NULL, y = "Mean Decrease Accuracy") +
+  theme_classic()
+
+print(p9)
+print(p10)
+
+tmm_signature2 <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_total = train_metadata,
+                                                     expr_test_list = list("Testing Set" = lcpm_test),  # named list of expression matrices
+                                                     meta_test_list = list("Testing Set" = test_metadata),   # named list of metadata data frames
+                                                     candidate_genes_up = candidate_genes_tmm_combined_up,
+                                                     candidate_genes_down = NULL,
+                                                     phenotype_col = "TMM", batch_col = "Cohort",
+                                                     label_neg = "NO_TMM",
+                                                     min_per_subgroup = 2,
+                                                     n_folds = 3 , n_repeats = 5,
+                                                     n_cores = 8,
+                                                     max_genes = 20,
+                                                     pivot_genes = c(CAB39L = "UP", FMO5 = "UP",
+                                                                     KCTD21 = "UP", FAXDC2 = "UP"),
+                                                     n_pivots    = 4L,
+                                                     lcb_conf   = 0.95,
+                                                     lcb_boot_R = 500,
+                                                     perm_R  = 500)
+
+alt_signature2 <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_total = train_metadata,
+                                                     expr_test_list = list("Testing Set" = lcpm_test),  # named list of expression matrices
+                                                     meta_test_list = list("Testing Set" = test_metadata),   # named list of metadata data frames
+                                                     candidate_genes_up = candidate_genes_alt_combined_up,
+                                                     candidate_genes_down = NULL,
+                                                     phenotype_col = "TMM", batch_col = "Cohort",
+                                                     label_neg = "ALT",
+                                                     min_per_subgroup = 2,
+                                                     n_folds = 3 , n_repeats = 5,
+                                                     n_cores = 8,
+                                                     max_genes = 20,
+                                                     pivot_genes = c(LINC01783 = "UP", LMNTD2 = "UP",
+                                                                     CCNB3 = "UP"),
+                                                     n_pivots    = 3L,
+                                                     lcb_conf   = 0.95,
+                                                     lcb_boot_R = 500,
+                                                     perm_R  = 500)
