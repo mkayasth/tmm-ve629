@@ -199,8 +199,8 @@ metadata_combined <- metadata_combined %>%
 ### Data split.
 Strata <- interaction(metadata_combined$Cohort, metadata_combined$TMM)
 
-set.seed(17) # For reproducibility83, 41.
-train_indices <- createDataPartition(Strata, p = 0.60, list = FALSE)
+set.seed(40) # For reproducibility83, 41, 17.
+train_indices <- createDataPartition(Strata, p = 0.70, list = FALSE)
 
 # training and testing set.
 train_metadata <- metadata_combined[train_indices, ]
@@ -347,11 +347,16 @@ importance_list <- list()
 
 
 sample_sizes <- c(
-  "NO_TMM" = 12,
-  "ALT"    = 6,
-  "Telomerase-Amplified" = 6,
-  "Telomerase-NotAmplified" = 6
+  "NO_TMM" = 10,
+  "ALT"    = 10,
+  "Telomerase-Amplified" = 5,
+  "Telomerase-NotAmplified" = 5
 )
+
+candidate_genes_tmm_combined <- candidate_genes_tmm_combined[candidate_genes_tmm_combined %in%
+                                                               candidate_genes_tmm_combined_up |
+                                                               candidate_genes_tmm_combined %in%
+                                                               candidate_genes_tmm_combined_down]
 
 candidate_genes_tmm_combined <- candidate_genes_tmm_combined[candidate_genes_tmm_combined %in% rownames(lcpm)]
 
@@ -393,16 +398,16 @@ stability_metrics <- all_seed_data %>%
     avg_rank_in_Gini_in_seeds = mean(rank_in_Gini)
   ) %>%
   # Quality filter: must have positive importance and valid contribution.
-  filter(mean_no_tmm > 0, mean_tmm > 0, mean_accuracy > quantile(mean_accuracy, 0.50)) %>%
-  arrange(desc(mean_accuracy)) %>%
-  mutate(gene_index = row_number())
+  filter(mean_no_tmm > 0, mean_tmm > 0, mean_accuracy > 0, mean_gini > 0) %>%
+  arrange(avg_accuracy_rank_in_seeds)
+  #mutate(gene_index = row_number())
 
 
 # Visualization: Stability vs. Magnitude
 p2 <- ggplot(stability_metrics, aes(x = seeds_present_in_top, y = mean_accuracy)) +
   geom_jitter(width = 0.2, alpha = 0.5, color = "#2E86AB") +
   geom_text_repel(
-    data = subset(stability_metrics, seeds_present_in_top >= 4),
+    data = subset(stability_metrics, seeds_present_in_top >= 7),
     aes(label = gene),
     size = 4.5,
     max.overlaps = 20
@@ -426,11 +431,11 @@ p2 <- ggplot(stability_metrics, aes(x = seeds_present_in_top, y = mean_accuracy)
 # Top 20 Lollipop Plot
 top_20_tmm <- stability_metrics %>% slice_head(n = 20)
 
-p3 <- ggplot(top_20_tmm, aes(x = reorder(gene, mean_accuracy), y = mean_accuracy)) +
-  geom_segment(aes(xend = gene, y = 0, yend = mean_accuracy), linewidth = 0.6) +
+p3 <- ggplot(top_20_tmm, aes(x = reorder(gene, avg_accuracy_rank_in_seeds), y = avg_accuracy_rank_in_seeds)) +
+  geom_segment(aes(xend = gene, y = 0, yend = avg_accuracy_rank_in_seeds), linewidth = 0.6) +
   geom_point(size = 4, color = "#2E86AB") +
   coord_flip() +
-  labs(title = "Top 20 Pivot Genes (Averaged)", x = NULL, y = "Mean Decrease Accuracy") +
+  labs(title = "Top 20 Pivot Genes (Averaged)", x = NULL, y = "Average Gene Ranks") +
   theme_classic()
 
 print(p2)
@@ -444,12 +449,16 @@ importance_list <- list()
 
 
 sample_sizes <- c(
-  "NO_TMM" = 6,
-  "ALT"    = 12,
-  "Telomerase-Amplified" = 6,
-  "Telomerase-NotAmplified" = 6
+  "NO_TMM" = 10,
+  "ALT"    = 10,
+  "Telomerase-Amplified" = 5,
+  "Telomerase-NotAmplified" = 5
 )
 
+candidate_genes_alt_combined <- candidate_genes_alt_combined[candidate_genes_alt_combined %in%
+                                                               candidate_genes_alt_combined_up |
+                                                               candidate_genes_alt_combined %in%
+                                                               candidate_genes_alt_combined_down]
 candidate_genes_alt_combined <- candidate_genes_alt_combined[candidate_genes_alt_combined %in% rownames(lcpm)]
 
 for (i in seq_along(seeds)) {
@@ -490,16 +499,15 @@ stability_metrics2 <- all_seed_data2 %>%
     avg_Gini_rank_in_seeds = mean(rank_in_Gini)
   ) %>%
   # Quality filter: must have positive importance and valid contribution.
-  filter(mean_alt > 0, mean_nonalt > 0, mean_accuracy > quantile(mean_accuracy, 0.50)) %>%
-  arrange(desc(mean_accuracy)) %>%
-  mutate(gene_index = row_number())
+  filter(mean_alt > 0, mean_nonalt > 0, mean_accuracy > 0, mean_gini > 0) %>%
+  arrange(avg_accuracy_rank_in_seeds)
 
 
 # Visualization: Stability vs. Magnitude
 p5 <- ggplot(stability_metrics2, aes(x = seeds_present_in_top, y = mean_accuracy)) +
   geom_jitter(width = 0.2, alpha = 0.5, color = "#2E86AB") +
   geom_text_repel(
-    data = subset(stability_metrics2, seeds_present_in_top >= 9),
+    data = subset(stability_metrics2, seeds_present_in_top >= 7),
     aes(label = gene),
     size = 4.5,
     max.overlaps = 20
@@ -524,8 +532,8 @@ p5 <- ggplot(stability_metrics2, aes(x = seeds_present_in_top, y = mean_accuracy
 # Top 20 Lollipop Plot
 top_20_alt <- stability_metrics2 %>% slice_head(n = 20)
 
-p6 <- ggplot(top_20_alt, aes(x = reorder(gene, mean_accuracy), y = mean_accuracy)) +
-  geom_segment(aes(xend = gene, y = 0, yend = mean_accuracy), linewidth = 0.6) +
+p6 <- ggplot(top_20_alt, aes(x = reorder(gene, avg_accuracy_rank_in_seeds), y = avg_accuracy_rank_in_seeds)) +
+  geom_segment(aes(xend = gene, y = 0, yend = avg_accuracy_rank_in_seeds), linewidth = 0.6) +
   geom_point(size = 4, color = "#2E86AB") +
   coord_flip() +
   labs(title = "Top 20 Pivot Genes (Averaged)", x = NULL, y = "Mean Decrease Accuracy") +
@@ -560,13 +568,14 @@ tmm_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_tot
                                                     min_per_subgroup = 2,
                                                     n_folds = 3 , n_repeats = 5,
                                                     n_cores = 8,
-                                                    max_genes = 20,
-                                                    pivot_genes = c(TERT = "DOWN", CAB39L = "UP",
-                                                                    SUV39H1 = "DOWN"),
+                                                    max_genes = 15,
+                                                    pivot_genes = c(PLCXD1 = "DOWN", DDX39A = "DOWN",
+                                                                    CAB39L = "UP"),
                                                     n_pivots    = 3L,
                                                     lcb_conf   = 0.95,
                                                     lcb_boot_R = 500,
-                                                    perm_R  = 500)
+                                                    perm_R  = 200)
+save.image()
 
 alt_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_total = train_metadata,
                                                      expr_test_list = list("Testing Set" = lcpm_test),  # named list of expression matrices
@@ -578,15 +587,15 @@ alt_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_tot
                                                      min_per_subgroup = 2,
                                                      n_folds = 3 , n_repeats = 5,
                                                      n_cores = 8,
-                                                     max_genes = 20,
-                                                     pivot_genes = c(LINC01783 = "UP", LMNTD2 = "UP",
-                                                                     CCNB3 = "UP"),
+                                                     max_genes = 15,
+                                                     pivot_genes = c(TADA3 = "DOWN", LMNTD2 = "UP",
+                                                                     COL22A1 = "UP"),
                                                      n_pivots    = 3L,
                                                      lcb_conf   = 0.95,
                                                      lcb_boot_R = 500,
-                                                     perm_R  = 500)
+                                                     perm_R  = 200)
 
-
+save.image()
 
 #####################################################################################
 #####################################################################################
@@ -799,13 +808,15 @@ tmm_signature2 <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_to
                                                      min_per_subgroup = 2,
                                                      n_folds = 3 , n_repeats = 5,
                                                      n_cores = 8,
-                                                     max_genes = 20,
+                                                     max_genes = 15,
                                                      pivot_genes = c(CAB39L = "UP", FMO5 = "UP",
                                                                      KCTD21 = "UP", FAXDC2 = "UP"),
                                                      n_pivots    = 4L,
                                                      lcb_conf   = 0.95,
                                                      lcb_boot_R = 500,
-                                                     perm_R  = 500)
+                                                     perm_R  = 200)
+
+save.image()
 
 alt_signature2 <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_total = train_metadata,
                                                      expr_test_list = list("Testing Set" = lcpm_test),  # named list of expression matrices
@@ -817,10 +828,12 @@ alt_signature2 <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_to
                                                      min_per_subgroup = 2,
                                                      n_folds = 3 , n_repeats = 5,
                                                      n_cores = 8,
-                                                     max_genes = 20,
+                                                     max_genes = 15,
                                                      pivot_genes = c(LINC01783 = "UP", LMNTD2 = "UP",
                                                                      CCNB3 = "UP"),
                                                      n_pivots    = 3L,
                                                      lcb_conf   = 0.95,
                                                      lcb_boot_R = 500,
-                                                     perm_R  = 500)
+                                                     perm_R  = 200)
+
+save.image()

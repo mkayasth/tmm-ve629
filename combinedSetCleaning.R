@@ -815,869 +815,869 @@ stability_metrics2[stability_metrics2$gene %in% candidate_genes_alt_combined_dow
 
 alt_up_membership <- alt_up_membership[alt_up_membership$Gene %in% candidate_genes_alt_combined_up, ]
 alt_down_membership <- alt_down_membership[alt_down_membership$Gene %in% candidate_genes_alt_combined_down, ]
-###################################################################################
-### for heatmap, making extra strats.
-train_metadata$Plot_Group <- as.character(train_metadata$TMM)
-
-
-# separating TMM patients with better survival.
-train_metadata$Vital_Status <- metadata_TARGET$Vital.Status[
-  match(train_metadata$SampleID, metadata_TARGET$SampleID)]
-train_metadata$OS_days <- metadata_TARGET$Overall.Survival.Time.in.Days[
-  match(train_metadata$SampleID, metadata_TARGET$SampleID)]
-train_metadata$OS_event <- ifelse(train_metadata$Vital_Status == "Dead", 1, 0)
-
-# Split each TMM group by optimal survival cutpoint.
-tmm_groups_with_surv <- c("ALT", "Telomerase-Amplified", "Telomerase-NotAmplified")
-
-surv_group_labels <- rep(NA_character_, nrow(train_metadata))
-
-for (grp in tmm_groups_with_surv) {
-  
-  idx <- which(
-    train_metadata$Cohort == "TARGET" &
-      train_metadata$TMM == grp &
-      !is.na(train_metadata$OS_days) &
-      !is.na(train_metadata$OS_event)
-  )
-  
-  if (length(idx) < 10) {
-    surv_group_labels[idx] <- grp
-    next
-  }
-  
-  sub_meta <- train_metadata[idx, ]
-  sub_meta$OS_days_var <- sub_meta$OS_days
-  
-  cut_res <- surv_cutpoint(
-    sub_meta,
-    time      = "OS_days",
-    event     = "OS_event",
-    variables = "OS_days_var"
-  )
-  cut_cat <- surv_categorize(cut_res)
-  
-  # cutpoint value
-  cp_value <- cut_res$cutpoint$cutpoint
-  
-  labels_grp <- ifelse(
-    cut_cat$OS_days_var == "high",
-    paste0(grp, "_LongSurv"),
-    paste0(grp, "_ShortSurv")
-  )
-  
-  # Alive patients below the cutpoint are late-entry/short follow-up,
-  # not true short survivors — reassign to LongSurv
-  early_censored <- which(
-    sub_meta$OS_event == 0 &        # alive (censored)
-      sub_meta$OS_days < cp_value   # below the cutpoint
-  )
-  labels_grp[early_censored] <- paste0(grp, "_LongSurv")
-  
-  surv_group_labels[idx] <- labels_grp
-}
-
-# Applying survival labels for TARGET TMM groups
-target_tmm_idx <- which(
-  train_metadata$Cohort == "TARGET" &
-    train_metadata$TMM %in% tmm_groups_with_surv &
-    !is.na(surv_group_labels)
-)
-train_metadata$Plot_Group[target_tmm_idx] <- surv_group_labels[target_tmm_idx]
-
-# NO_TMM high telomere content.
-train_metadata$Plot_Group[
-  train_metadata$TMM == "NO_TMM" & train_metadata$`Telomere Content` > 15
-] <- "NO_TMM_HighTC"
-
-train_metadata$Plot_Group[
-  train_metadata$TMM == "Telomerase-Amplified" & train_metadata$`Telomere Content` > 15
-] <- "TA_HighTC"
-
-train_metadata$Plot_Group[
-  train_metadata$TMM == "Telomerase-NotAmplified" & train_metadata$`Telomere Content` > 15
-] <- "TNA_HighTC"
-
-
-###################
-
-
-## Heatmap of TMM-ve upregulated genes in training set.
-
-selected_genes <- c(candidate_genes_tmm_combined_up, candidate_genes_tmm_combined_down)
-row_split_vector <- c(rep("Up-regulated", length(candidate_genes_tmm_combined_up)), 
-                      rep("Down-regulated", length(candidate_genes_tmm_combined_down)))
-
-
-plot_matrix        <- lcpm[selected_genes, ]
-plot_matrix_scaled <- t(scale(t(plot_matrix)))
-col_fun            <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
-
-group_colors <- c(
-  # TARGET — with survival splits
-  "ALT_LongSurv"                        = "#1A5C9E",
-  "ALT_ShortSurv"                       = "#7EB6E8",
-  "Telomerase-Amplified_LongSurv"       = "#9C1A1A",
-  "Telomerase-Amplified_ShortSurv"      = "#E07070",
-  "Telomerase-NotAmplified_LongSurv"    = "#B05000",
-  "Telomerase-NotAmplified_ShortSurv"   = "#E0A870",
-  "TNA_HighTC" = "#E0A999",
-  
-  # Non-TARGET — no survival data, plain TMM label
-  "ALT"                                 = "#A8C8E8",   # lighter shade of ALT blue
-  "Telomerase-Amplified"                = "#F0B0B0",   # lighter shade of Tel-Amp red
-  "Telomerase-NotAmplified"             = "#F0D0A0",   # lighter shade of Tel-NotAmp orange
-  
-  # NO_TMM groups (no survival data available regardless of cohort)
-  "NO_TMM"                              = "#418561",
-  "NO_TMM_HighTC"                       = "#2A6B50"
-)
-
-present_colors <- group_colors[names(group_colors) %in% unique(train_metadata$Plot_Group)]
-
-ht <- Heatmap(
-  plot_matrix_scaled,
-  name   = "Z-score",
-  border = "black",
-  
-  cluster_rows     = TRUE,
-  show_row_names   = FALSE,
-  row_split        = row_split_vector,
-  row_title_gp     = gpar(fontsize = 8, fontface = "bold"),
-  
-  column_split          = factor(train_metadata$Plot_Group),
-  column_title_rot = 45, 
-  column_title_gp       = gpar(fontsize = 5, fontface = "bold"),
-  show_column_names     = TRUE,
-  column_names_gp       = gpar(fontsize = 4),
-  cluster_columns       = TRUE,
-  cluster_column_slices = FALSE,
-  
-  col = col_fun,
-  
-  top_annotation = HeatmapAnnotation(
-    TMM_Status           = train_metadata$Plot_Group,
-    show_legend          = FALSE,
-    show_annotation_name = FALSE,
-    col                  = list(TMM_Status = present_colors)
-  )
-)
-
-pdf("Heatmap-tmm-training-equalsplit.pdf", width = 15, height = 15)
-draw(ht)
-dev.off()
-
-#####
-
-## Heatmap of TMM-ve upregulated genes in testing set.
-
-test_metadata$Plot_Group <- as.character(test_metadata$TMM)
-
-
-test_metadata$Vital_Status <- metadata_TARGET$Vital.Status[
-  match(test_metadata$SampleID, metadata_TARGET$SampleID)]
-test_metadata$OS_days <- metadata_TARGET$Overall.Survival.Time.in.Days[
-  match(test_metadata$SampleID, metadata_TARGET$SampleID)]
-test_metadata$OS_event <- ifelse(test_metadata$Vital_Status == "Dead", 1, 0)
-
-tmm_groups_with_surv <- c("ALT", "Telomerase-Amplified", "Telomerase-NotAmplified")
-
-surv_group_labels <- rep(NA_character_, nrow(test_metadata))
-
-for (grp in tmm_groups_with_surv) {
-  
-  idx <- which(
-    test_metadata$Cohort == "TARGET" &
-      test_metadata$TMM == grp &
-      !is.na(test_metadata$OS_days) &
-      !is.na(test_metadata$OS_event)
-  )
-  
-  if (length(idx) < 5) {
-    surv_group_labels[idx] <- grp
-    next
-  }
-  
-  sub_meta <- test_metadata[idx, ]
-  sub_meta$OS_days_var <- sub_meta$OS_days
-  
-  cut_res <- surv_cutpoint(
-    sub_meta,
-    time      = "OS_days",
-    event     = "OS_event",
-    variables = "OS_days_var"
-  )
-  cut_cat <- surv_categorize(cut_res)
-  
-  surv_group_labels[idx] <- ifelse(
-    cut_cat$OS_days_var == "high",
-    paste0(grp, "_LongSurv"),
-    paste0(grp, "_ShortSurv")
-  )
-}
-
-
-
-target_tmm_idx <- which(
-  test_metadata$Cohort == "TARGET" &
-    test_metadata$TMM %in% tmm_groups_with_surv &
-    !is.na(surv_group_labels)
-)
-test_metadata$Plot_Group[target_tmm_idx] <- surv_group_labels[target_tmm_idx]
-
-# NO_TMM high telomere content.
-test_metadata$Plot_Group[
-  test_metadata$TMM == "NO_TMM" & test_metadata$`Telomere Content` > 15
-] <- "NO_TMM_HighTC"
-
-test_metadata$Plot_Group[
-  test_metadata$TMM == "Telomerase-Amplified" & test_metadata$`Telomere Content` > 15
-] <- "TA_HighTC"
-
-test_metadata$Plot_Group[
-  test_metadata$TMM == "Telomerase-NotAmplified" & test_metadata$`Telomere Content` > 15
-] <- "TNA_HighTC"
-
-#####
-
-selected_genes   <- c(candidate_genes_tmm_combined_up, candidate_genes_tmm_combined_down)
-row_split_vector <- c(
-  rep("Up-regulated",   length(candidate_genes_tmm_combined_up)),
-  rep("Down-regulated", length(candidate_genes_tmm_combined_down))
-)
-
-plot_matrix        <- lcpm_test[selected_genes, ]
-plot_matrix_scaled <- t(scale(t(plot_matrix)))
-col_fun            <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
-
-group_colors <- c(
-  # TARGET — with survival splits
-  "ALT_LongSurv"                        = "#1A5C9E",
-  "ALT_ShortSurv"                       = "#7EB6E8",
-  "Telomerase-Amplified_LongSurv"       = "#9C1A1A",
-  "Telomerase-Amplified_ShortSurv"      = "#E07070",
-  "Telomerase-NotAmplified_LongSurv"    = "#B05000",
-  "Telomerase-NotAmplified_ShortSurv"   = "#E0A870",
-  "TNA_HighTC" = "#E0A999",
-  
-  # Non-TARGET — no survival data, plain TMM label
-  "ALT"                                 = "#A8C8E8",   # lighter shade of ALT blue
-  "Telomerase-Amplified"                = "#F0B0B0",   # lighter shade of Tel-Amp red
-  "Telomerase-NotAmplified"             = "#F0D0A0",   # lighter shade of Tel-NotAmp orange
-  
-  # NO_TMM groups (no survival data available regardless of cohort)
-  "NO_TMM"                              = "#418561",
-  "NO_TMM_HighTC"                       = "#2A6B50"
-)
-
-present_colors <- group_colors[names(group_colors) %in% unique(test_metadata$Plot_Group)]
-
-ht <- Heatmap(
-  plot_matrix_scaled,
-  name   = "Z-score",
-  border = "black",
-  
-  cluster_rows     = TRUE,
-  show_row_names   = FALSE,
-  row_split        = row_split_vector,
-  row_title_gp     = gpar(fontsize = 8, fontface = "bold"),
-  
-  column_split          = factor(test_metadata$Plot_Group),
-  column_title_rot      = 90,
-  column_title_gp       = gpar(fontsize = 6, fontface = "bold"),
-  show_column_names     = TRUE,
-  column_names_gp       = gpar(fontsize = 4),
-  cluster_columns       = TRUE,
-  cluster_column_slices = FALSE,
-  
-  col = col_fun,
-  
-  top_annotation = HeatmapAnnotation(
-    TMM_Status           = test_metadata$Plot_Group,
-    show_legend          = FALSE,
-    show_annotation_name = FALSE,
-    col                  = list(TMM_Status = present_colors)
-  )
-)
-
-pdf("Heatmap-tmm-testing-equalSplit.pdf", width = 10, height = 15)
-draw(ht)
-dev.off()
-
-##################################################################################
-## same thing for ALT.
-
-## Heatmap of TMM-ve upregulated genes in training set.
-
-selected_genes <- c(candidate_genes_alt_combined_up, candidate_genes_alt_combined_down)
-row_split_vector <- c(rep("Up-regulated", length(candidate_genes_alt_combined_up)), 
-                      rep("Down-regulated", length(candidate_genes_alt_combined_down)))
-
-
-plot_matrix        <- lcpm[selected_genes, ]
-plot_matrix_scaled <- t(scale(t(plot_matrix)))
-col_fun            <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
-
-group_colors <- c(
-  # TARGET — with survival splits
-  "ALT_LongSurv"                        = "#1A5C9E",
-  "ALT_ShortSurv"                       = "#7EB6E8",
-  "Telomerase-Amplified_LongSurv"       = "#9C1A1A",
-  "Telomerase-Amplified_ShortSurv"      = "#E07070",
-  "Telomerase-NotAmplified_LongSurv"    = "#B05000",
-  "Telomerase-NotAmplified_ShortSurv"   = "#E0A870",
-  "TNA_HighTC" = "#E0A999",
-  
-  # Non-TARGET — no survival data, plain TMM label
-  "ALT"                                 = "#A8C8E8",   # lighter shade of ALT blue
-  "Telomerase-Amplified"                = "#F0B0B0",   # lighter shade of Tel-Amp red
-  "Telomerase-NotAmplified"             = "#F0D0A0",   # lighter shade of Tel-NotAmp orange
-  
-  # NO_TMM groups (no survival data available regardless of cohort)
-  "NO_TMM"                              = "#418561",
-  "NO_TMM_HighTC"                       = "#2A6B50"
-)
-
-
-present_colors <- group_colors[names(group_colors) %in% unique(train_metadata$Plot_Group)]
-
-ht <- Heatmap(
-  plot_matrix_scaled,
-  name   = "Z-score",
-  border = "black",
-  
-  cluster_rows     = TRUE,
-  show_row_names   = FALSE,
-  row_split        = row_split_vector,
-  row_title_gp     = gpar(fontsize = 8, fontface = "bold"),
-  
-  column_split          = factor(train_metadata$Plot_Group),
-  column_title_rot = 45, 
-  column_title_gp       = gpar(fontsize = 5, fontface = "bold"),
-  show_column_names     = TRUE,
-  column_names_gp       = gpar(fontsize = 4),
-  cluster_columns       = TRUE,
-  cluster_column_slices = FALSE,
-  
-  col = col_fun,
-  
-  top_annotation = HeatmapAnnotation(
-    TMM_Status           = train_metadata$Plot_Group,
-    show_legend          = FALSE,
-    show_annotation_name = FALSE,
-    col                  = list(TMM_Status = present_colors)
-  )
-)
-
-pdf("Heatmap-alt-training-equalSplit.pdf", width = 15, height = 15)
-draw(ht)
-dev.off()
-
-#####
-
-## Heatmap of TMM-ve upregulated genes in testing set.
-
-selected_genes   <- c(candidate_genes_alt_combined_up, candidate_genes_alt_combined_down)
-row_split_vector <- c(
-  rep("Up-regulated",   length(candidate_genes_alt_combined_up)),
-  rep("Down-regulated", length(candidate_genes_alt_combined_down))
-)
-
-plot_matrix        <- lcpm_test[selected_genes, ]
-plot_matrix_scaled <- t(scale(t(plot_matrix)))
-col_fun            <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
-
-group_colors <- c(
-  # TARGET — with survival splits
-  "ALT_LongSurv"                        = "#1A5C9E",
-  "ALT_ShortSurv"                       = "#7EB6E8",
-  "Telomerase-Amplified_LongSurv"       = "#9C1A1A",
-  "Telomerase-Amplified_ShortSurv"      = "#E07070",
-  "Telomerase-NotAmplified_LongSurv"    = "#B05000",
-  "Telomerase-NotAmplified_ShortSurv"   = "#E0A870",
-  "TNA_HighTC" = "#E0A999",
-  
-  # Non-TARGET — no survival data, plain TMM label
-  "ALT"                                 = "#A8C8E8",   # lighter shade of ALT blue
-  "Telomerase-Amplified"                = "#F0B0B0",   # lighter shade of Tel-Amp red
-  "Telomerase-NotAmplified"             = "#F0D0A0",   # lighter shade of Tel-NotAmp orange
-  
-  # NO_TMM groups (no survival data available regardless of cohort)
-  "NO_TMM"                              = "#418561",
-  "NO_TMM_HighTC"                       = "#2A6B50"
-)
-
-
-present_colors <- group_colors[names(group_colors) %in% unique(test_metadata$Plot_Group)]
-
-ht <- Heatmap(
-  plot_matrix_scaled,
-  name   = "Z-score",
-  border = "black",
-  
-  cluster_rows     = TRUE,
-  show_row_names   = FALSE,
-  row_split        = row_split_vector,
-  row_title_gp     = gpar(fontsize = 8, fontface = "bold"),
-  
-  column_split          = factor(test_metadata$Plot_Group),
-  column_title_rot      = 90,
-  column_title_gp       = gpar(fontsize = 6, fontface = "bold"),
-  show_column_names     = TRUE,
-  column_names_gp       = gpar(fontsize = 4),
-  cluster_columns       = TRUE,
-  cluster_column_slices = FALSE,
-  
-  col = col_fun,
-  
-  top_annotation = HeatmapAnnotation(
-    TMM_Status           = test_metadata$Plot_Group,
-    show_legend          = FALSE,
-    show_annotation_name = FALSE,
-    col                  = list(TMM_Status = present_colors)
-  )
-)
-
-pdf("Heatmap-alt-testing-equalSplit.pdf", width = 10, height = 15)
-draw(ht)
-dev.off()
-
-##################################################################################
-
-# # SIGNATURE BUILDING.
-# 
-# tmm_up_zscore <- run_harmonic_cv_selection_TMMve(expr_total = lcpm, meta_total = train_metadata,
-#                                                       expr_test = lcpm_test, meta_test = test_metadata,
-#                                                       candidate_genes = candidate_genes_tmm_combined_up,
-#                                                       phenotype_col = "TMM", batch_col = "Cohort",
-#                                                       label_neg = "NO_TMM",
-#                                                       min_per_subgroup= 2,
-#                                                       n_folds = 3, n_repeats = 5,
-#                                                       n_cores = 8,
-#                                                       max_genes = 15,
-#                                                       seed_genes = NULL,
-#                                                       lcb_conf = 0.95,
-#                                                       lcb_boot_R = 500)
+# ###################################################################################
+# ### for heatmap, making extra strats.
+# train_metadata$Plot_Group <- as.character(train_metadata$TMM)
 # 
 # 
-# tmm_down_zscore <- run_harmonic_cv_selection_TMMve(expr_total = lcpm, meta_total = train_metadata,
-#                                                    expr_test = lcpm_test, meta_test = test_metadata,
-#                                                    candidate_genes = candidate_genes_tmm_combined_down,
-#                                                    phenotype_col = "TMM", batch_col = "Cohort",
-#                                                    label_neg = "NO_TMM",
-#                                                    min_per_subgroup= 2,
-#                                                    n_folds = 3, n_repeats = 5,
-#                                                    n_cores = 8,
-#                                                    max_genes = 15,
-#                                                    seed_genes = NULL,
-#                                                    lcb_conf = 0.95,
-#                                                    lcb_boot_R = 500)
+# # separating TMM patients with better survival.
+# train_metadata$Vital_Status <- metadata_TARGET$Vital.Status[
+#   match(train_metadata$SampleID, metadata_TARGET$SampleID)]
+# train_metadata$OS_days <- metadata_TARGET$Overall.Survival.Time.in.Days[
+#   match(train_metadata$SampleID, metadata_TARGET$SampleID)]
+# train_metadata$OS_event <- ifelse(train_metadata$Vital_Status == "Dead", 1, 0)
 # 
-# alt_up_zscore <- run_harmonic_cv_selection_ALT(expr_total = lcpm, meta_total = train_metadata,
-#                                                  expr_test = lcpm_test, meta_test = test_metadata,
-#                                                  candidate_genes = candidate_genes_tmm_combined_up,
-#                                                  phenotype_col = "TMM", batch_col = "Cohort",
-#                                                  label_neg = "ALT",
-#                                                  min_per_subgroup= 2,
-#                                                  n_folds = 3, n_repeats = 5,
-#                                                  n_cores = 8,
-#                                                  max_genes = 15,
-#                                                  seed_genes = NULL,
-#                                                  lcb_conf = 0.95,
-#                                                  lcb_boot_R = 500)
+# # Split each TMM group by optimal survival cutpoint.
+# tmm_groups_with_surv <- c("ALT", "Telomerase-Amplified", "Telomerase-NotAmplified")
+# 
+# surv_group_labels <- rep(NA_character_, nrow(train_metadata))
+# 
+# for (grp in tmm_groups_with_surv) {
+#   
+#   idx <- which(
+#     train_metadata$Cohort == "TARGET" &
+#       train_metadata$TMM == grp &
+#       !is.na(train_metadata$OS_days) &
+#       !is.na(train_metadata$OS_event)
+#   )
+#   
+#   if (length(idx) < 10) {
+#     surv_group_labels[idx] <- grp
+#     next
+#   }
+#   
+#   sub_meta <- train_metadata[idx, ]
+#   sub_meta$OS_days_var <- sub_meta$OS_days
+#   
+#   cut_res <- surv_cutpoint(
+#     sub_meta,
+#     time      = "OS_days",
+#     event     = "OS_event",
+#     variables = "OS_days_var"
+#   )
+#   cut_cat <- surv_categorize(cut_res)
+#   
+#   # cutpoint value
+#   cp_value <- cut_res$cutpoint$cutpoint
+#   
+#   labels_grp <- ifelse(
+#     cut_cat$OS_days_var == "high",
+#     paste0(grp, "_LongSurv"),
+#     paste0(grp, "_ShortSurv")
+#   )
+#   
+#   # Alive patients below the cutpoint are late-entry/short follow-up,
+#   # not true short survivors — reassign to LongSurv
+#   early_censored <- which(
+#     sub_meta$OS_event == 0 &        # alive (censored)
+#       sub_meta$OS_days < cp_value   # below the cutpoint
+#   )
+#   labels_grp[early_censored] <- paste0(grp, "_LongSurv")
+#   
+#   surv_group_labels[idx] <- labels_grp
+# }
+# 
+# # Applying survival labels for TARGET TMM groups
+# target_tmm_idx <- which(
+#   train_metadata$Cohort == "TARGET" &
+#     train_metadata$TMM %in% tmm_groups_with_surv &
+#     !is.na(surv_group_labels)
+# )
+# train_metadata$Plot_Group[target_tmm_idx] <- surv_group_labels[target_tmm_idx]
+# 
+# # NO_TMM high telomere content.
+# train_metadata$Plot_Group[
+#   train_metadata$TMM == "NO_TMM" & train_metadata$`Telomere Content` > 15
+# ] <- "NO_TMM_HighTC"
+# 
+# train_metadata$Plot_Group[
+#   train_metadata$TMM == "Telomerase-Amplified" & train_metadata$`Telomere Content` > 15
+# ] <- "TA_HighTC"
+# 
+# train_metadata$Plot_Group[
+#   train_metadata$TMM == "Telomerase-NotAmplified" & train_metadata$`Telomere Content` > 15
+# ] <- "TNA_HighTC"
+# 
+# 
+# ###################
+# 
+# 
+# ## Heatmap of TMM-ve upregulated genes in training set.
+# 
+# selected_genes <- c(candidate_genes_tmm_combined_up, candidate_genes_tmm_combined_down)
+# row_split_vector <- c(rep("Up-regulated", length(candidate_genes_tmm_combined_up)), 
+#                       rep("Down-regulated", length(candidate_genes_tmm_combined_down)))
+# 
+# 
+# plot_matrix        <- lcpm[selected_genes, ]
+# plot_matrix_scaled <- t(scale(t(plot_matrix)))
+# col_fun            <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
+# 
+# group_colors <- c(
+#   # TARGET — with survival splits
+#   "ALT_LongSurv"                        = "#1A5C9E",
+#   "ALT_ShortSurv"                       = "#7EB6E8",
+#   "Telomerase-Amplified_LongSurv"       = "#9C1A1A",
+#   "Telomerase-Amplified_ShortSurv"      = "#E07070",
+#   "Telomerase-NotAmplified_LongSurv"    = "#B05000",
+#   "Telomerase-NotAmplified_ShortSurv"   = "#E0A870",
+#   "TNA_HighTC" = "#E0A999",
+#   
+#   # Non-TARGET — no survival data, plain TMM label
+#   "ALT"                                 = "#A8C8E8",   # lighter shade of ALT blue
+#   "Telomerase-Amplified"                = "#F0B0B0",   # lighter shade of Tel-Amp red
+#   "Telomerase-NotAmplified"             = "#F0D0A0",   # lighter shade of Tel-NotAmp orange
+#   
+#   # NO_TMM groups (no survival data available regardless of cohort)
+#   "NO_TMM"                              = "#418561",
+#   "NO_TMM_HighTC"                       = "#2A6B50"
+# )
+# 
+# present_colors <- group_colors[names(group_colors) %in% unique(train_metadata$Plot_Group)]
+# 
+# ht <- Heatmap(
+#   plot_matrix_scaled,
+#   name   = "Z-score",
+#   border = "black",
+#   
+#   cluster_rows     = TRUE,
+#   show_row_names   = FALSE,
+#   row_split        = row_split_vector,
+#   row_title_gp     = gpar(fontsize = 8, fontface = "bold"),
+#   
+#   column_split          = factor(train_metadata$Plot_Group),
+#   column_title_rot = 45, 
+#   column_title_gp       = gpar(fontsize = 5, fontface = "bold"),
+#   show_column_names     = TRUE,
+#   column_names_gp       = gpar(fontsize = 4),
+#   cluster_columns       = TRUE,
+#   cluster_column_slices = FALSE,
+#   
+#   col = col_fun,
+#   
+#   top_annotation = HeatmapAnnotation(
+#     TMM_Status           = train_metadata$Plot_Group,
+#     show_legend          = FALSE,
+#     show_annotation_name = FALSE,
+#     col                  = list(TMM_Status = present_colors)
+#   )
+# )
+# 
+# pdf("Heatmap-tmm-training-equalsplit.pdf", width = 15, height = 15)
+# draw(ht)
+# dev.off()
+# 
+# #####
+# 
+# ## Heatmap of TMM-ve upregulated genes in testing set.
+# 
+# test_metadata$Plot_Group <- as.character(test_metadata$TMM)
+# 
+# 
+# test_metadata$Vital_Status <- metadata_TARGET$Vital.Status[
+#   match(test_metadata$SampleID, metadata_TARGET$SampleID)]
+# test_metadata$OS_days <- metadata_TARGET$Overall.Survival.Time.in.Days[
+#   match(test_metadata$SampleID, metadata_TARGET$SampleID)]
+# test_metadata$OS_event <- ifelse(test_metadata$Vital_Status == "Dead", 1, 0)
+# 
+# tmm_groups_with_surv <- c("ALT", "Telomerase-Amplified", "Telomerase-NotAmplified")
+# 
+# surv_group_labels <- rep(NA_character_, nrow(test_metadata))
+# 
+# for (grp in tmm_groups_with_surv) {
+#   
+#   idx <- which(
+#     test_metadata$Cohort == "TARGET" &
+#       test_metadata$TMM == grp &
+#       !is.na(test_metadata$OS_days) &
+#       !is.na(test_metadata$OS_event)
+#   )
+#   
+#   if (length(idx) < 5) {
+#     surv_group_labels[idx] <- grp
+#     next
+#   }
+#   
+#   sub_meta <- test_metadata[idx, ]
+#   sub_meta$OS_days_var <- sub_meta$OS_days
+#   
+#   cut_res <- surv_cutpoint(
+#     sub_meta,
+#     time      = "OS_days",
+#     event     = "OS_event",
+#     variables = "OS_days_var"
+#   )
+#   cut_cat <- surv_categorize(cut_res)
+#   
+#   surv_group_labels[idx] <- ifelse(
+#     cut_cat$OS_days_var == "high",
+#     paste0(grp, "_LongSurv"),
+#     paste0(grp, "_ShortSurv")
+#   )
+# }
 # 
 # 
 # 
-# alt_down_zscore <- run_harmonic_cv_selection_ALT(expr_total = lcpm, meta_total = train_metadata,
-#                                                expr_test = lcpm_test, meta_test = test_metadata,
-#                                                candidate_genes = candidate_genes_tmm_combined_down,
-#                                                phenotype_col = "TMM", batch_col = "Cohort",
-#                                                label_neg = "ALT",
-#                                                min_per_subgroup= 2,
-#                                                n_folds = 3, n_repeats = 5,
-#                                                n_cores = 8,
-#                                                max_genes = 15,
-#                                                seed_genes = NULL,
-#                                                lcb_conf = 0.95,
-#                                                lcb_boot_R = 500)
+# target_tmm_idx <- which(
+#   test_metadata$Cohort == "TARGET" &
+#     test_metadata$TMM %in% tmm_groups_with_surv &
+#     !is.na(surv_group_labels)
+# )
+# test_metadata$Plot_Group[target_tmm_idx] <- surv_group_labels[target_tmm_idx]
 # 
+# # NO_TMM high telomere content.
+# test_metadata$Plot_Group[
+#   test_metadata$TMM == "NO_TMM" & test_metadata$`Telomere Content` > 15
+# ] <- "NO_TMM_HighTC"
+# 
+# test_metadata$Plot_Group[
+#   test_metadata$TMM == "Telomerase-Amplified" & test_metadata$`Telomere Content` > 15
+# ] <- "TA_HighTC"
+# 
+# test_metadata$Plot_Group[
+#   test_metadata$TMM == "Telomerase-NotAmplified" & test_metadata$`Telomere Content` > 15
+# ] <- "TNA_HighTC"
+# 
+# #####
+# 
+# selected_genes   <- c(candidate_genes_tmm_combined_up, candidate_genes_tmm_combined_down)
+# row_split_vector <- c(
+#   rep("Up-regulated",   length(candidate_genes_tmm_combined_up)),
+#   rep("Down-regulated", length(candidate_genes_tmm_combined_down))
+# )
+# 
+# plot_matrix        <- lcpm_test[selected_genes, ]
+# plot_matrix_scaled <- t(scale(t(plot_matrix)))
+# col_fun            <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
+# 
+# group_colors <- c(
+#   # TARGET — with survival splits
+#   "ALT_LongSurv"                        = "#1A5C9E",
+#   "ALT_ShortSurv"                       = "#7EB6E8",
+#   "Telomerase-Amplified_LongSurv"       = "#9C1A1A",
+#   "Telomerase-Amplified_ShortSurv"      = "#E07070",
+#   "Telomerase-NotAmplified_LongSurv"    = "#B05000",
+#   "Telomerase-NotAmplified_ShortSurv"   = "#E0A870",
+#   "TNA_HighTC" = "#E0A999",
+#   
+#   # Non-TARGET — no survival data, plain TMM label
+#   "ALT"                                 = "#A8C8E8",   # lighter shade of ALT blue
+#   "Telomerase-Amplified"                = "#F0B0B0",   # lighter shade of Tel-Amp red
+#   "Telomerase-NotAmplified"             = "#F0D0A0",   # lighter shade of Tel-NotAmp orange
+#   
+#   # NO_TMM groups (no survival data available regardless of cohort)
+#   "NO_TMM"                              = "#418561",
+#   "NO_TMM_HighTC"                       = "#2A6B50"
+# )
+# 
+# present_colors <- group_colors[names(group_colors) %in% unique(test_metadata$Plot_Group)]
+# 
+# ht <- Heatmap(
+#   plot_matrix_scaled,
+#   name   = "Z-score",
+#   border = "black",
+#   
+#   cluster_rows     = TRUE,
+#   show_row_names   = FALSE,
+#   row_split        = row_split_vector,
+#   row_title_gp     = gpar(fontsize = 8, fontface = "bold"),
+#   
+#   column_split          = factor(test_metadata$Plot_Group),
+#   column_title_rot      = 90,
+#   column_title_gp       = gpar(fontsize = 6, fontface = "bold"),
+#   show_column_names     = TRUE,
+#   column_names_gp       = gpar(fontsize = 4),
+#   cluster_columns       = TRUE,
+#   cluster_column_slices = FALSE,
+#   
+#   col = col_fun,
+#   
+#   top_annotation = HeatmapAnnotation(
+#     TMM_Status           = test_metadata$Plot_Group,
+#     show_legend          = FALSE,
+#     show_annotation_name = FALSE,
+#     col                  = list(TMM_Status = present_colors)
+#   )
+# )
+# 
+# pdf("Heatmap-tmm-testing-equalSplit.pdf", width = 10, height = 15)
+# draw(ht)
+# dev.off()
+# 
+# ##################################################################################
+# ## same thing for ALT.
+# 
+# ## Heatmap of TMM-ve upregulated genes in training set.
+# 
+# selected_genes <- c(candidate_genes_alt_combined_up, candidate_genes_alt_combined_down)
+# row_split_vector <- c(rep("Up-regulated", length(candidate_genes_alt_combined_up)), 
+#                       rep("Down-regulated", length(candidate_genes_alt_combined_down)))
+# 
+# 
+# plot_matrix        <- lcpm[selected_genes, ]
+# plot_matrix_scaled <- t(scale(t(plot_matrix)))
+# col_fun            <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
+# 
+# group_colors <- c(
+#   # TARGET — with survival splits
+#   "ALT_LongSurv"                        = "#1A5C9E",
+#   "ALT_ShortSurv"                       = "#7EB6E8",
+#   "Telomerase-Amplified_LongSurv"       = "#9C1A1A",
+#   "Telomerase-Amplified_ShortSurv"      = "#E07070",
+#   "Telomerase-NotAmplified_LongSurv"    = "#B05000",
+#   "Telomerase-NotAmplified_ShortSurv"   = "#E0A870",
+#   "TNA_HighTC" = "#E0A999",
+#   
+#   # Non-TARGET — no survival data, plain TMM label
+#   "ALT"                                 = "#A8C8E8",   # lighter shade of ALT blue
+#   "Telomerase-Amplified"                = "#F0B0B0",   # lighter shade of Tel-Amp red
+#   "Telomerase-NotAmplified"             = "#F0D0A0",   # lighter shade of Tel-NotAmp orange
+#   
+#   # NO_TMM groups (no survival data available regardless of cohort)
+#   "NO_TMM"                              = "#418561",
+#   "NO_TMM_HighTC"                       = "#2A6B50"
+# )
+# 
+# 
+# present_colors <- group_colors[names(group_colors) %in% unique(train_metadata$Plot_Group)]
+# 
+# ht <- Heatmap(
+#   plot_matrix_scaled,
+#   name   = "Z-score",
+#   border = "black",
+#   
+#   cluster_rows     = TRUE,
+#   show_row_names   = FALSE,
+#   row_split        = row_split_vector,
+#   row_title_gp     = gpar(fontsize = 8, fontface = "bold"),
+#   
+#   column_split          = factor(train_metadata$Plot_Group),
+#   column_title_rot = 45, 
+#   column_title_gp       = gpar(fontsize = 5, fontface = "bold"),
+#   show_column_names     = TRUE,
+#   column_names_gp       = gpar(fontsize = 4),
+#   cluster_columns       = TRUE,
+#   cluster_column_slices = FALSE,
+#   
+#   col = col_fun,
+#   
+#   top_annotation = HeatmapAnnotation(
+#     TMM_Status           = train_metadata$Plot_Group,
+#     show_legend          = FALSE,
+#     show_annotation_name = FALSE,
+#     col                  = list(TMM_Status = present_colors)
+#   )
+# )
+# 
+# pdf("Heatmap-alt-training-equalSplit.pdf", width = 15, height = 15)
+# draw(ht)
+# dev.off()
+# 
+# #####
+# 
+# ## Heatmap of TMM-ve upregulated genes in testing set.
+# 
+# selected_genes   <- c(candidate_genes_alt_combined_up, candidate_genes_alt_combined_down)
+# row_split_vector <- c(
+#   rep("Up-regulated",   length(candidate_genes_alt_combined_up)),
+#   rep("Down-regulated", length(candidate_genes_alt_combined_down))
+# )
+# 
+# plot_matrix        <- lcpm_test[selected_genes, ]
+# plot_matrix_scaled <- t(scale(t(plot_matrix)))
+# col_fun            <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
+# 
+# group_colors <- c(
+#   # TARGET — with survival splits
+#   "ALT_LongSurv"                        = "#1A5C9E",
+#   "ALT_ShortSurv"                       = "#7EB6E8",
+#   "Telomerase-Amplified_LongSurv"       = "#9C1A1A",
+#   "Telomerase-Amplified_ShortSurv"      = "#E07070",
+#   "Telomerase-NotAmplified_LongSurv"    = "#B05000",
+#   "Telomerase-NotAmplified_ShortSurv"   = "#E0A870",
+#   "TNA_HighTC" = "#E0A999",
+#   
+#   # Non-TARGET — no survival data, plain TMM label
+#   "ALT"                                 = "#A8C8E8",   # lighter shade of ALT blue
+#   "Telomerase-Amplified"                = "#F0B0B0",   # lighter shade of Tel-Amp red
+#   "Telomerase-NotAmplified"             = "#F0D0A0",   # lighter shade of Tel-NotAmp orange
+#   
+#   # NO_TMM groups (no survival data available regardless of cohort)
+#   "NO_TMM"                              = "#418561",
+#   "NO_TMM_HighTC"                       = "#2A6B50"
+# )
+# 
+# 
+# present_colors <- group_colors[names(group_colors) %in% unique(test_metadata$Plot_Group)]
+# 
+# ht <- Heatmap(
+#   plot_matrix_scaled,
+#   name   = "Z-score",
+#   border = "black",
+#   
+#   cluster_rows     = TRUE,
+#   show_row_names   = FALSE,
+#   row_split        = row_split_vector,
+#   row_title_gp     = gpar(fontsize = 8, fontface = "bold"),
+#   
+#   column_split          = factor(test_metadata$Plot_Group),
+#   column_title_rot      = 90,
+#   column_title_gp       = gpar(fontsize = 6, fontface = "bold"),
+#   show_column_names     = TRUE,
+#   column_names_gp       = gpar(fontsize = 4),
+#   cluster_columns       = TRUE,
+#   cluster_column_slices = FALSE,
+#   
+#   col = col_fun,
+#   
+#   top_annotation = HeatmapAnnotation(
+#     TMM_Status           = test_metadata$Plot_Group,
+#     show_legend          = FALSE,
+#     show_annotation_name = FALSE,
+#     col                  = list(TMM_Status = present_colors)
+#   )
+# )
+# 
+# pdf("Heatmap-alt-testing-equalSplit.pdf", width = 10, height = 15)
+# draw(ht)
+# dev.off()
+# 
+# ##################################################################################
+# 
+# # # SIGNATURE BUILDING.
+# # 
+# # tmm_up_zscore <- run_harmonic_cv_selection_TMMve(expr_total = lcpm, meta_total = train_metadata,
+# #                                                       expr_test = lcpm_test, meta_test = test_metadata,
+# #                                                       candidate_genes = candidate_genes_tmm_combined_up,
+# #                                                       phenotype_col = "TMM", batch_col = "Cohort",
+# #                                                       label_neg = "NO_TMM",
+# #                                                       min_per_subgroup= 2,
+# #                                                       n_folds = 3, n_repeats = 5,
+# #                                                       n_cores = 8,
+# #                                                       max_genes = 15,
+# #                                                       seed_genes = NULL,
+# #                                                       lcb_conf = 0.95,
+# #                                                       lcb_boot_R = 500)
+# # 
+# # 
+# # tmm_down_zscore <- run_harmonic_cv_selection_TMMve(expr_total = lcpm, meta_total = train_metadata,
+# #                                                    expr_test = lcpm_test, meta_test = test_metadata,
+# #                                                    candidate_genes = candidate_genes_tmm_combined_down,
+# #                                                    phenotype_col = "TMM", batch_col = "Cohort",
+# #                                                    label_neg = "NO_TMM",
+# #                                                    min_per_subgroup= 2,
+# #                                                    n_folds = 3, n_repeats = 5,
+# #                                                    n_cores = 8,
+# #                                                    max_genes = 15,
+# #                                                    seed_genes = NULL,
+# #                                                    lcb_conf = 0.95,
+# #                                                    lcb_boot_R = 500)
+# # 
+# # alt_up_zscore <- run_harmonic_cv_selection_ALT(expr_total = lcpm, meta_total = train_metadata,
+# #                                                  expr_test = lcpm_test, meta_test = test_metadata,
+# #                                                  candidate_genes = candidate_genes_tmm_combined_up,
+# #                                                  phenotype_col = "TMM", batch_col = "Cohort",
+# #                                                  label_neg = "ALT",
+# #                                                  min_per_subgroup= 2,
+# #                                                  n_folds = 3, n_repeats = 5,
+# #                                                  n_cores = 8,
+# #                                                  max_genes = 15,
+# #                                                  seed_genes = NULL,
+# #                                                  lcb_conf = 0.95,
+# #                                                  lcb_boot_R = 500)
+# # 
+# # 
+# # 
+# # alt_down_zscore <- run_harmonic_cv_selection_ALT(expr_total = lcpm, meta_total = train_metadata,
+# #                                                expr_test = lcpm_test, meta_test = test_metadata,
+# #                                                candidate_genes = candidate_genes_tmm_combined_down,
+# #                                                phenotype_col = "TMM", batch_col = "Cohort",
+# #                                                label_neg = "ALT",
+# #                                                min_per_subgroup= 2,
+# #                                                n_folds = 3, n_repeats = 5,
+# #                                                n_cores = 8,
+# #                                                max_genes = 15,
+# #                                                seed_genes = NULL,
+# #                                                lcb_conf = 0.95,
+# #                                                lcb_boot_R = 500)
+# # 
+# # 
+# # #######################################################################################
+# # 
+# # tmm_singscore <- run_harmonic_cv_selection_TMMve_singscore(expr_total = lcpm , meta_total = train_metadata,
+# #                                                            expr_test = lcpm_test, meta_test = test_metadata,
+# #                                                            candidate_genes_up = candidate_genes_tmm_combined_up,
+# #                                                            candidate_genes_down = candidate_genes_tmm_combined_down,
+# #                                                            phenotype_col = "TMM", batch_col = "Cohort",
+# #                                                            label_neg = "NO_TMM",
+# #                                                            min_per_subgroup = 2,
+# #                                                            n_folds = 3, n_repeats = 5,
+# #                                                            n_cores = 8,
+# #                                                            max_genes = 20,
+# #                                                            seed_genes_up   = c("MYO9A", "FAXDC2", "ZSWIM6"),
+# #                                                            seed_genes_down = c("MRPL58", "SUV39H1", "SELENOH"),
+# #                                                            lcb_conf   = 0.95,
+# #                                                            lcb_boot_R = 500,
+# #                                                            perm_R     = 500)
+# # 
+# # 
+# 
+# 
+# ###################################################################################
+# ###################################################################################
+# 
+# # TMM_COLORS <- c(
+# #   "ALT"                     = "#2196F3", # Blue
+# #   "NO_TMM"                  = "#43A047", # Green
+# #   "TMM-ve"                  = "#43A047", # Green (Alias)
+# #   "Telomerase"              = "#E53935", # Red
+# #   "Telomerase-Amplified"    = "#FB8C00", # Orange
+# #   "Telomerase-NotAmplified" = "#8E24AA"  # Purple
+# # )
+# # 
+# # # This function handles data prep, plotting, and pagination for any dataset
+# # generate_gene_report <- function(expr_matrix, metadata, gene_list, output_file) {
+# # 
+# #   # A. Identify present genes
+# #   genes_present <- gene_list[gene_list %in% rownames(expr_matrix)]
+# #   if(length(genes_present) == 0) {
+# #     message("No genes from the list found in the provided matrix.")
+# #     return(NULL)
+# #   }
+# # 
+# #   # B. Prepare long-format data
+# #   lcpm_sub <- expr_matrix[genes_present, , drop = FALSE]
+# #   lcpm_long <- as.data.frame(t(lcpm_sub)) %>%
+# #     tibble::rownames_to_column("SampleID") %>%
+# #     pivot_longer(cols = -SampleID, names_to = "gene", values_to = "logCPM") %>%
+# #     left_join(metadata[, c("SampleID", "TMM")], by = "SampleID") %>%
+# #     mutate(
+# #       TMM = factor(TMM),
+# #       gene = factor(gene, levels = genes_present)
+# #     )
+# # 
+# #   # C. Internal Boxplot Generator
+# #   make_boxplot <- function(gene_name) {
+# #     df_gene <- lcpm_long %>% filter(gene == gene_name)
+# # 
+# #     # Define comparisons against ALT/NO_TMM
+# #     # Only create comparisons for levels that actually exist in this specific dataset
+# #     existing_levels <- levels(droplevels(df_gene$TMM))
+# #     other_levels <- setdiff(existing_levels, "NO_TMM")
+# #     comparisons <- lapply(other_levels, function(x) c("NO_TMM", x))
+# # 
+# #     ggplot(df_gene, aes(x = TMM, y = logCPM, fill = TMM)) +
+# #       geom_boxplot(outlier.shape = NA, width = 0.40, linewidth = 0.4) +
+# #       geom_jitter(width = 0.15, size = 0.8, alpha = 0.5, color = "black") +
+# #     
+# #       scale_fill_manual(values = TMM_COLORS) +
+# #       labs(title = gene_name, x = NULL, y = "log CPM") +
+# #       stat_compare_means(
+# #         comparisons = comparisons,
+# #         method = "t.test",
+# #         method.args = list(var.equal = FALSE),
+# #         label = "p.signif",
+# #         tip.length = 0.01,
+# #         step.increase = 0.05,
+# #         size = 3.5
+# #       ) +
+# #       theme_classic() +
+# #       theme(
+# #         plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+# #         legend.position = "none",
+# #         axis.text.x = element_text(size = 10, angle = 30, hjust = 1),
+# #         axis.text.y = element_text(size = 10),
+# #         plot.margin = unit(c(5, 5, 5, 5), "pt")
+# #       )
+# #   }
+# # 
+# #   # D. Generate and Paginate Plots
+# #   all_plots <- lapply(genes_present, make_boxplot)
+# #   plots_per_page <- 9
+# #   n_pages <- ceiling(length(all_plots) / plots_per_page)
+# # 
+# #   pdf(output_file, width = 10, height = 14)
+# #   for (p in seq_len(n_pages)) {
+# #     idx_start <- (p - 1) * plots_per_page + 1
+# #     idx_end   <- min(p * plots_per_page, length(all_plots))
+# #     page_plots <- all_plots[idx_start:idx_end]
+# # 
+# #     # Pad with blank panels if needed
+# #     while (length(page_plots) < plots_per_page) {
+# #       page_plots[[length(page_plots) + 1]] <- ggplot() + theme_void()
+# #     }
+# # 
+# #     grid.arrange(
+# #       grobs = page_plots, ncol = 3, nrow = 3,
+# #       top = grid::textGrob(
+# #         label = paste0(output_file, " | Page ", p, " of ", n_pages),
+# #         gp = grid::gpar(fontsize = 10, fontface = "bold")
+# #       )
+# #     )
+# #   }
+# #   dev.off()
+# #   message("Report saved to: ", output_file)
+# # }
+# # 
+# # 
+# # target_genes <- c("LINC01783", "CCNB3", "LMNTD2", "DNAH14", "RNU5F-1")
+# # 
+# # # Train Report
+# # generate_gene_report(
+# #   expr_matrix = lcpm,
+# #   metadata = train_metadata,
+# #   gene_list = target_genes,
+# #   output_file = "pivot-ALTtraining.pdf"
+# # )
+# # 
+# # # Test Report
+# # generate_gene_report(
+# #   expr_matrix = lcpm_test,
+# #   metadata = test_metadata,
+# #   gene_list = target_genes,
+# #   output_file = "pivot_ALT_test.pdf"
+# # )
 # 
 # #######################################################################################
 # 
-# tmm_singscore <- run_harmonic_cv_selection_TMMve_singscore(expr_total = lcpm , meta_total = train_metadata,
-#                                                            expr_test = lcpm_test, meta_test = test_metadata,
-#                                                            candidate_genes_up = candidate_genes_tmm_combined_up,
-#                                                            candidate_genes_down = candidate_genes_tmm_combined_down,
-#                                                            phenotype_col = "TMM", batch_col = "Cohort",
-#                                                            label_neg = "NO_TMM",
-#                                                            min_per_subgroup = 2,
-#                                                            n_folds = 3, n_repeats = 5,
-#                                                            n_cores = 8,
-#                                                            max_genes = 20,
-#                                                            seed_genes_up   = c("MYO9A", "FAXDC2", "ZSWIM6"),
-#                                                            seed_genes_down = c("MRPL58", "SUV39H1", "SELENOH"),
-#                                                            lcb_conf   = 0.95,
-#                                                            lcb_boot_R = 500,
-#                                                            perm_R     = 500)
+# # target_genes <- c("MYO9A", "MRPL58", "FAXDC2", "SUV39H1", "SELENOH", "ZSWIM6", "NCAM2", "DUS1L",
+# #                   "TSEN54", "NUP85", "RNU6-722P", "VPS13C", "TEDC1", "SECISBP2L")
+# #
+# # # Generate Train Report
+# # generate_gene_report(
+# #   expr_matrix = lcpm,
+# #   metadata = train_metadata,
+# #   gene_list = target_genes,
+# #   output_file = "pivot-tmmtraining.pdf"
+# # )
+# #
+# # # Generate Test Report
+# # generate_gene_report(
+# #   expr_matrix = lcpm_test,
+# #   metadata = test_metadata,
+# #   gene_list = target_genes,
+# #   output_file = "pivot_tmm_test.pdf"
+# # )
 # 
+# ####################################################################################
+# ####################################################################################
 # 
-
-
-###################################################################################
-###################################################################################
-
-# TMM_COLORS <- c(
-#   "ALT"                     = "#2196F3", # Blue
-#   "NO_TMM"                  = "#43A047", # Green
-#   "TMM-ve"                  = "#43A047", # Green (Alias)
-#   "Telomerase"              = "#E53935", # Red
-#   "Telomerase-Amplified"    = "#FB8C00", # Orange
-#   "Telomerase-NotAmplified" = "#8E24AA"  # Purple
-# )
+# ## heatmap using pivot genes -- NO_TMM.
 # 
-# # This function handles data prep, plotting, and pagination for any dataset
-# generate_gene_report <- function(expr_matrix, metadata, gene_list, output_file) {
+# # Using the genes identified in your finalized clean_gene_list.txt
+# # new_gene_list <- c(
+# #   "MYO9A", "MRPL58", "FAXDC2", "SUV39H1", "SELENOH", "ZSWIM6", "NCAM2", "DUS1L",
+# #   "TSEN54", "NUP85", "RNU6-722P", "VPS13C", "TEDC1", "SECISBP2L"
+# # )
+# #
+# # col_fun <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
+# #
+# # group_colors <- c(
+# #   "ALT_LongSurv"                      = "#1A5C9E",
+# #   "ALT_ShortSurv"                     = "#7EB6E8",
+# #   "Telomerase-Amplified_LongSurv"      = "#9C1A1A",
+# #   "Telomerase-Amplified_ShortSurv"     = "#E07070",
+# #   "Telomerase-NotAmplified_LongSurv"   = "#B05000",
+# #   "Telomerase-NotAmplified_ShortSurv"  = "#E0A870",
+# #   "ALT"                               = "#A8C8E8",
+# #   "Telomerase-Amplified"              = "#F0B0B0",
+# #   "Telomerase-NotAmplified"           = "#F0D0A0",
+# #   "NO_TMM"                            = "#418561",
+# #   "NO_TMM_HighTC"                     = "#2A6B50"
+# # )
+# #
+# # generate_split_heatmap <- function(expr_mat, metadata, genes, output_name, dataset_label) {
+# #
+# #   # A. Filter genes present in matrix
+# #   valid_genes <- intersect(genes, rownames(expr_mat))
+# #
+# #   # B. Calculate Directionality (Up vs Down in NO_TMM)
+# #   # We compare NO_TMM vs the average of everyone else
+# #   is_target <- metadata$TMM_Case == "NO_TMM"
+# #   target_means <- rowMeans(expr_mat[valid_genes, is_target, drop=FALSE])
+# #   other_means  <- rowMeans(expr_mat[valid_genes, !is_target, drop=FALSE])
+# #
+# #   up_genes   <- valid_genes[target_means > other_means]
+# #   down_genes <- valid_genes[target_means <= other_means]
+# #
+# #   ordered_genes <- c(up_genes, down_genes)
+# #   row_split_vec <- factor(c(rep("Up-regulated", length(up_genes)),
+# #                             rep("Down-regulated", length(down_genes))),
+# #                           levels = c("Up-regulated", "Down-regulated"))
+# #
+# #   # C. Prepare Matrix
+# #   plot_matrix <- t(scale(t(expr_mat[ordered_genes, metadata$SampleID])))
+# #
+# #   # D. Colors
+# #   present_colors <- group_colors[names(group_colors) %in% unique(metadata$Plot_Group)]
+# #
+# #   # E. Build Heatmap
+# #   ht <- Heatmap(
+# #     plot_matrix,
+# #     name   = "Z-score",
+# #     border = "black",
+# #     cluster_rows   = TRUE,
+# #     show_row_names = TRUE, # Enabled to see which new genes are where
+# #     row_names_gp   = gpar(fontsize = 6),
+# #     row_split      = row_split_vec,
+# #     row_title_gp   = gpar(fontsize = 10, fontface = "bold"),
+# #
+# #     column_split   = factor(metadata$Plot_Group),
+# #     column_title_rot = 45,
+# #     column_title_gp  = gpar(fontsize = 7, fontface = "bold"),
+# #     show_column_names = FALSE,
+# #     cluster_columns   = TRUE,
+# #     cluster_column_slices = FALSE,
+# #
+# #     col = col_fun,
+# #
+# #     top_annotation = HeatmapAnnotation(
+# #       TMM_Status = metadata$Plot_Group,
+# #       show_legend = FALSE,
+# #       show_annotation_name = FALSE,
+# #       col = list(TMM_Status = present_colors),
+# #       simple_anno_size = unit(0.5, "cm")
+# #     )
+# #   )
+# #
+# #   # F. Export
+# #   pdf(output_name, width = 16, height = 6)
+# #   draw(ht, column_title = paste("TMM Pivot Heatmap  -", dataset_label),
+# #        column_title_gp = gpar(fontsize = 16, fontface = "bold"))
+# #   dev.off()
+# #
+# #   message("Generated: ", output_name)
+# # }
+# # # Training Set
+# # generate_split_heatmap(
+# #   expr_mat = lcpm,
+# #   metadata = train_metadata,
+# #   genes = new_gene_list,
+# #   output_name = "Heatmap-pivot-Training.pdf",
+# #   dataset_label = "Training Set"
+# # )
+# #
+# # # Testing Set
+# # generate_split_heatmap(
+# #   expr_mat = lcpm_test,
+# #   metadata = test_metadata,
+# #   genes = new_gene_list,
+# #   output_name = "Heatmap-pivot-Testing.pdf",
+# #   dataset_label = "Testing Set"
+# # )
+# #
+# #
+# # #########################################################################################
+# #
+# # ## heatmap using pivot genes -- ALT
+# #
+# # new_gene_list <- c("ZNF285", "BBOX1-AS1", "LINC01783", "CCNB3", "TCAIM", "TADA3", "PTPRG",
+# #                    "OLFM2", "STRIP2", "MAGEA9B", "LINC01916", "XK", "MYZAP", "CYFIP1",
+# #                    "COL22A1", "OTULINL"
+# #
+# # )
+# #
+# # # --- 2. GLOBAL VISUAL CONFIGURATION ---
+# # col_fun <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
+# #
+# # group_colors <- c(
+# #   "ALT_LongSurv"                      = "#1A5C9E",
+# #   "ALT_ShortSurv"                     = "#7EB6E8",
+# #   "Telomerase-Amplified_LongSurv"      = "#9C1A1A",
+# #   "Telomerase-Amplified_ShortSurv"     = "#E07070",
+# #   "Telomerase-NotAmplified_LongSurv"   = "#B05000",
+# #   "Telomerase-NotAmplified_ShortSurv"  = "#E0A870",
+# #   "ALT"                               = "#A8C8E8",
+# #   "Telomerase-Amplified"              = "#F0B0B0",
+# #   "Telomerase-NotAmplified"           = "#F0D0A0",
+# #   "NO_TMM"                            = "#418561",
+# #   "NO_TMM_HighTC"                     = "#2A6B50"
+# # )
+# #
+# # # --- 3. HELPER FUNCTION: PREPARE AND DRAW HEATMAP (ALT vs Non-ALT) ---
+# # generate_split_heatmap <- function(expr_mat, metadata, genes, output_name, dataset_label) {
+# #
+# #   # A. Filter genes present in matrix
+# #   valid_genes <- intersect(genes, rownames(expr_mat))
+# #
+# #   # B. Calculate Directionality (ALT vs Non-ALT)
+# #   # We compare ALT vs the average of everyone else (Telomerase + NO_TMM)
+# #   # Assuming 'TMM' column contains the strings 'ALT', 'Telomerase', and 'NO_TMM'
+# #   is_alt <- metadata$TMM == "ALT"
+# #
+# #   alt_means   <- rowMeans(expr_mat[valid_genes, is_alt, drop=FALSE])
+# #   other_means <- rowMeans(expr_mat[valid_genes, !is_alt, drop=FALSE])
+# #
+# #   up_genes   <- valid_genes[alt_means > other_means]
+# #   down_genes <- valid_genes[alt_means <= other_means]
+# #
+# #   ordered_genes <- c(up_genes, down_genes)
+# #   row_split_vec <- factor(c(rep("ALT Upregulated", length(up_genes)),
+# #                             rep("ALT Downregulated", length(down_genes))),
+# #                           levels = c("ALT Upregulated", "ALT Downregulated"))
+# #
+# #   # C. Prepare Matrix
+# #   plot_matrix <- t(scale(t(expr_mat[ordered_genes, metadata$SampleID])))
+# #
+# #   # D. Colors
+# #   present_colors <- group_colors[names(group_colors) %in% unique(metadata$Plot_Group)]
+# #
+# #   # E. Build Heatmap
+# #   ht <- Heatmap(
+# #     plot_matrix,
+# #     name   = "Z-score",
+# #     border = "black",
+# #     cluster_rows   = TRUE,
+# #     show_row_names = TRUE,
+# #     row_names_gp   = gpar(fontsize = 8),
+# #     row_split      = row_split_vec,
+# #     row_title_gp   = gpar(fontsize = 10, fontface = "bold"),
+# #
+# #     column_split   = factor(metadata$Plot_Group),
+# #     column_title_rot = 45,
+# #     column_title_gp  = gpar(fontsize = 7, fontface = "bold"),
+# #     show_column_names = FALSE,
+# #     cluster_columns   = TRUE,
+# #     cluster_column_slices = FALSE,
+# #
+# #     col = col_fun,
+# #
+# #     top_annotation = HeatmapAnnotation(
+# #       TMM_Status = metadata$Plot_Group,
+# #       show_legend = FALSE,
+# #       show_annotation_name = FALSE,
+# #       col = list(TMM_Status = present_colors),
+# #       simple_anno_size = unit(0.5, "cm")
+# #     )
+# #   )
+# #
+# #   # F. Export
+# #   # Width and height adjusted for a focused pivot gene set
+# #   pdf(output_name, width = 16, height = 6)
+# #   draw(ht, column_title = paste("ALT vs Non-ALT Pivot Heatmap -", dataset_label),
+# #        column_title_gp = gpar(fontsize = 16, fontface = "bold"))
+# #   dev.off()
+# #
+# #   message("Generated: ", output_name)
+# # }
+# #
+# # # --- 4. EXECUTION ---
+# #
+# # # Training Set
+# # generate_split_heatmap(
+# #   expr_mat = lcpm,
+# #   metadata = train_metadata,
+# #   genes = new_gene_list,
+# #   output_name = "Heatmap-ALT-Pivot-Training.pdf",
+# #   dataset_label = "Training Set"
+# # )
+# #
+# # # Testing Set
+# # generate_split_heatmap(
+# #   expr_mat = lcpm_test,
+# #   metadata = test_metadata,
+# #   genes = new_gene_list,
+# #   output_name = "Heatmap-ALT-Pivot-Testing.pdf",
+# #   dataset_label = "Testing Set"
+# # )
 # 
-#   # A. Identify present genes
-#   genes_present <- gene_list[gene_list %in% rownames(expr_matrix)]
-#   if(length(genes_present) == 0) {
-#     message("No genes from the list found in the provided matrix.")
-#     return(NULL)
-#   }
-# 
-#   # B. Prepare long-format data
-#   lcpm_sub <- expr_matrix[genes_present, , drop = FALSE]
-#   lcpm_long <- as.data.frame(t(lcpm_sub)) %>%
-#     tibble::rownames_to_column("SampleID") %>%
-#     pivot_longer(cols = -SampleID, names_to = "gene", values_to = "logCPM") %>%
-#     left_join(metadata[, c("SampleID", "TMM")], by = "SampleID") %>%
-#     mutate(
-#       TMM = factor(TMM),
-#       gene = factor(gene, levels = genes_present)
-#     )
-# 
-#   # C. Internal Boxplot Generator
-#   make_boxplot <- function(gene_name) {
-#     df_gene <- lcpm_long %>% filter(gene == gene_name)
-# 
-#     # Define comparisons against ALT/NO_TMM
-#     # Only create comparisons for levels that actually exist in this specific dataset
-#     existing_levels <- levels(droplevels(df_gene$TMM))
-#     other_levels <- setdiff(existing_levels, "NO_TMM")
-#     comparisons <- lapply(other_levels, function(x) c("NO_TMM", x))
-# 
-#     ggplot(df_gene, aes(x = TMM, y = logCPM, fill = TMM)) +
-#       geom_boxplot(outlier.shape = NA, width = 0.40, linewidth = 0.4) +
-#       geom_jitter(width = 0.15, size = 0.8, alpha = 0.5, color = "black") +
-#     
-#       scale_fill_manual(values = TMM_COLORS) +
-#       labs(title = gene_name, x = NULL, y = "log CPM") +
-#       stat_compare_means(
-#         comparisons = comparisons,
-#         method = "t.test",
-#         method.args = list(var.equal = FALSE),
-#         label = "p.signif",
-#         tip.length = 0.01,
-#         step.increase = 0.05,
-#         size = 3.5
-#       ) +
-#       theme_classic() +
-#       theme(
-#         plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
-#         legend.position = "none",
-#         axis.text.x = element_text(size = 10, angle = 30, hjust = 1),
-#         axis.text.y = element_text(size = 10),
-#         plot.margin = unit(c(5, 5, 5, 5), "pt")
-#       )
-#   }
-# 
-#   # D. Generate and Paginate Plots
-#   all_plots <- lapply(genes_present, make_boxplot)
-#   plots_per_page <- 9
-#   n_pages <- ceiling(length(all_plots) / plots_per_page)
-# 
-#   pdf(output_file, width = 10, height = 14)
-#   for (p in seq_len(n_pages)) {
-#     idx_start <- (p - 1) * plots_per_page + 1
-#     idx_end   <- min(p * plots_per_page, length(all_plots))
-#     page_plots <- all_plots[idx_start:idx_end]
-# 
-#     # Pad with blank panels if needed
-#     while (length(page_plots) < plots_per_page) {
-#       page_plots[[length(page_plots) + 1]] <- ggplot() + theme_void()
-#     }
-# 
-#     grid.arrange(
-#       grobs = page_plots, ncol = 3, nrow = 3,
-#       top = grid::textGrob(
-#         label = paste0(output_file, " | Page ", p, " of ", n_pages),
-#         gp = grid::gpar(fontsize = 10, fontface = "bold")
-#       )
-#     )
-#   }
-#   dev.off()
-#   message("Report saved to: ", output_file)
-# }
-# 
-# 
-# target_genes <- c("LINC01783", "CCNB3", "LMNTD2", "DNAH14", "RNU5F-1")
-# 
-# # Train Report
-# generate_gene_report(
-#   expr_matrix = lcpm,
-#   metadata = train_metadata,
-#   gene_list = target_genes,
-#   output_file = "pivot-ALTtraining.pdf"
-# )
-# 
-# # Test Report
-# generate_gene_report(
-#   expr_matrix = lcpm_test,
-#   metadata = test_metadata,
-#   gene_list = target_genes,
-#   output_file = "pivot_ALT_test.pdf"
-# )
-
-#######################################################################################
-
-# target_genes <- c("MYO9A", "MRPL58", "FAXDC2", "SUV39H1", "SELENOH", "ZSWIM6", "NCAM2", "DUS1L",
-#                   "TSEN54", "NUP85", "RNU6-722P", "VPS13C", "TEDC1", "SECISBP2L")
-#
-# # Generate Train Report
-# generate_gene_report(
-#   expr_matrix = lcpm,
-#   metadata = train_metadata,
-#   gene_list = target_genes,
-#   output_file = "pivot-tmmtraining.pdf"
-# )
-#
-# # Generate Test Report
-# generate_gene_report(
-#   expr_matrix = lcpm_test,
-#   metadata = test_metadata,
-#   gene_list = target_genes,
-#   output_file = "pivot_tmm_test.pdf"
-# )
-
-####################################################################################
-####################################################################################
-
-## heatmap using pivot genes -- NO_TMM.
-
-# Using the genes identified in your finalized clean_gene_list.txt
-# new_gene_list <- c(
-#   "MYO9A", "MRPL58", "FAXDC2", "SUV39H1", "SELENOH", "ZSWIM6", "NCAM2", "DUS1L",
-#   "TSEN54", "NUP85", "RNU6-722P", "VPS13C", "TEDC1", "SECISBP2L"
-# )
-#
-# col_fun <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
-#
-# group_colors <- c(
-#   "ALT_LongSurv"                      = "#1A5C9E",
-#   "ALT_ShortSurv"                     = "#7EB6E8",
-#   "Telomerase-Amplified_LongSurv"      = "#9C1A1A",
-#   "Telomerase-Amplified_ShortSurv"     = "#E07070",
-#   "Telomerase-NotAmplified_LongSurv"   = "#B05000",
-#   "Telomerase-NotAmplified_ShortSurv"  = "#E0A870",
-#   "ALT"                               = "#A8C8E8",
-#   "Telomerase-Amplified"              = "#F0B0B0",
-#   "Telomerase-NotAmplified"           = "#F0D0A0",
-#   "NO_TMM"                            = "#418561",
-#   "NO_TMM_HighTC"                     = "#2A6B50"
-# )
-#
-# generate_split_heatmap <- function(expr_mat, metadata, genes, output_name, dataset_label) {
-#
-#   # A. Filter genes present in matrix
-#   valid_genes <- intersect(genes, rownames(expr_mat))
-#
-#   # B. Calculate Directionality (Up vs Down in NO_TMM)
-#   # We compare NO_TMM vs the average of everyone else
-#   is_target <- metadata$TMM_Case == "NO_TMM"
-#   target_means <- rowMeans(expr_mat[valid_genes, is_target, drop=FALSE])
-#   other_means  <- rowMeans(expr_mat[valid_genes, !is_target, drop=FALSE])
-#
-#   up_genes   <- valid_genes[target_means > other_means]
-#   down_genes <- valid_genes[target_means <= other_means]
-#
-#   ordered_genes <- c(up_genes, down_genes)
-#   row_split_vec <- factor(c(rep("Up-regulated", length(up_genes)),
-#                             rep("Down-regulated", length(down_genes))),
-#                           levels = c("Up-regulated", "Down-regulated"))
-#
-#   # C. Prepare Matrix
-#   plot_matrix <- t(scale(t(expr_mat[ordered_genes, metadata$SampleID])))
-#
-#   # D. Colors
-#   present_colors <- group_colors[names(group_colors) %in% unique(metadata$Plot_Group)]
-#
-#   # E. Build Heatmap
-#   ht <- Heatmap(
-#     plot_matrix,
-#     name   = "Z-score",
-#     border = "black",
-#     cluster_rows   = TRUE,
-#     show_row_names = TRUE, # Enabled to see which new genes are where
-#     row_names_gp   = gpar(fontsize = 6),
-#     row_split      = row_split_vec,
-#     row_title_gp   = gpar(fontsize = 10, fontface = "bold"),
-#
-#     column_split   = factor(metadata$Plot_Group),
-#     column_title_rot = 45,
-#     column_title_gp  = gpar(fontsize = 7, fontface = "bold"),
-#     show_column_names = FALSE,
-#     cluster_columns   = TRUE,
-#     cluster_column_slices = FALSE,
-#
-#     col = col_fun,
-#
-#     top_annotation = HeatmapAnnotation(
-#       TMM_Status = metadata$Plot_Group,
-#       show_legend = FALSE,
-#       show_annotation_name = FALSE,
-#       col = list(TMM_Status = present_colors),
-#       simple_anno_size = unit(0.5, "cm")
-#     )
-#   )
-#
-#   # F. Export
-#   pdf(output_name, width = 16, height = 6)
-#   draw(ht, column_title = paste("TMM Pivot Heatmap  -", dataset_label),
-#        column_title_gp = gpar(fontsize = 16, fontface = "bold"))
-#   dev.off()
-#
-#   message("Generated: ", output_name)
-# }
-# # Training Set
-# generate_split_heatmap(
-#   expr_mat = lcpm,
-#   metadata = train_metadata,
-#   genes = new_gene_list,
-#   output_name = "Heatmap-pivot-Training.pdf",
-#   dataset_label = "Training Set"
-# )
-#
-# # Testing Set
-# generate_split_heatmap(
-#   expr_mat = lcpm_test,
-#   metadata = test_metadata,
-#   genes = new_gene_list,
-#   output_name = "Heatmap-pivot-Testing.pdf",
-#   dataset_label = "Testing Set"
-# )
-#
-#
-# #########################################################################################
-#
-# ## heatmap using pivot genes -- ALT
-#
-# new_gene_list <- c("ZNF285", "BBOX1-AS1", "LINC01783", "CCNB3", "TCAIM", "TADA3", "PTPRG",
-#                    "OLFM2", "STRIP2", "MAGEA9B", "LINC01916", "XK", "MYZAP", "CYFIP1",
-#                    "COL22A1", "OTULINL"
-#
-# )
-#
-# # --- 2. GLOBAL VISUAL CONFIGURATION ---
-# col_fun <- colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#9C2424"))
-#
-# group_colors <- c(
-#   "ALT_LongSurv"                      = "#1A5C9E",
-#   "ALT_ShortSurv"                     = "#7EB6E8",
-#   "Telomerase-Amplified_LongSurv"      = "#9C1A1A",
-#   "Telomerase-Amplified_ShortSurv"     = "#E07070",
-#   "Telomerase-NotAmplified_LongSurv"   = "#B05000",
-#   "Telomerase-NotAmplified_ShortSurv"  = "#E0A870",
-#   "ALT"                               = "#A8C8E8",
-#   "Telomerase-Amplified"              = "#F0B0B0",
-#   "Telomerase-NotAmplified"           = "#F0D0A0",
-#   "NO_TMM"                            = "#418561",
-#   "NO_TMM_HighTC"                     = "#2A6B50"
-# )
-#
-# # --- 3. HELPER FUNCTION: PREPARE AND DRAW HEATMAP (ALT vs Non-ALT) ---
-# generate_split_heatmap <- function(expr_mat, metadata, genes, output_name, dataset_label) {
-#
-#   # A. Filter genes present in matrix
-#   valid_genes <- intersect(genes, rownames(expr_mat))
-#
-#   # B. Calculate Directionality (ALT vs Non-ALT)
-#   # We compare ALT vs the average of everyone else (Telomerase + NO_TMM)
-#   # Assuming 'TMM' column contains the strings 'ALT', 'Telomerase', and 'NO_TMM'
-#   is_alt <- metadata$TMM == "ALT"
-#
-#   alt_means   <- rowMeans(expr_mat[valid_genes, is_alt, drop=FALSE])
-#   other_means <- rowMeans(expr_mat[valid_genes, !is_alt, drop=FALSE])
-#
-#   up_genes   <- valid_genes[alt_means > other_means]
-#   down_genes <- valid_genes[alt_means <= other_means]
-#
-#   ordered_genes <- c(up_genes, down_genes)
-#   row_split_vec <- factor(c(rep("ALT Upregulated", length(up_genes)),
-#                             rep("ALT Downregulated", length(down_genes))),
-#                           levels = c("ALT Upregulated", "ALT Downregulated"))
-#
-#   # C. Prepare Matrix
-#   plot_matrix <- t(scale(t(expr_mat[ordered_genes, metadata$SampleID])))
-#
-#   # D. Colors
-#   present_colors <- group_colors[names(group_colors) %in% unique(metadata$Plot_Group)]
-#
-#   # E. Build Heatmap
-#   ht <- Heatmap(
-#     plot_matrix,
-#     name   = "Z-score",
-#     border = "black",
-#     cluster_rows   = TRUE,
-#     show_row_names = TRUE,
-#     row_names_gp   = gpar(fontsize = 8),
-#     row_split      = row_split_vec,
-#     row_title_gp   = gpar(fontsize = 10, fontface = "bold"),
-#
-#     column_split   = factor(metadata$Plot_Group),
-#     column_title_rot = 45,
-#     column_title_gp  = gpar(fontsize = 7, fontface = "bold"),
-#     show_column_names = FALSE,
-#     cluster_columns   = TRUE,
-#     cluster_column_slices = FALSE,
-#
-#     col = col_fun,
-#
-#     top_annotation = HeatmapAnnotation(
-#       TMM_Status = metadata$Plot_Group,
-#       show_legend = FALSE,
-#       show_annotation_name = FALSE,
-#       col = list(TMM_Status = present_colors),
-#       simple_anno_size = unit(0.5, "cm")
-#     )
-#   )
-#
-#   # F. Export
-#   # Width and height adjusted for a focused pivot gene set
-#   pdf(output_name, width = 16, height = 6)
-#   draw(ht, column_title = paste("ALT vs Non-ALT Pivot Heatmap -", dataset_label),
-#        column_title_gp = gpar(fontsize = 16, fontface = "bold"))
-#   dev.off()
-#
-#   message("Generated: ", output_name)
-# }
-#
-# # --- 4. EXECUTION ---
-#
-# # Training Set
-# generate_split_heatmap(
-#   expr_mat = lcpm,
-#   metadata = train_metadata,
-#   genes = new_gene_list,
-#   output_name = "Heatmap-ALT-Pivot-Training.pdf",
-#   dataset_label = "Training Set"
-# )
-#
-# # Testing Set
-# generate_split_heatmap(
-#   expr_mat = lcpm_test,
-#   metadata = test_metadata,
-#   genes = new_gene_list,
-#   output_name = "Heatmap-ALT-Pivot-Testing.pdf",
-#   dataset_label = "Testing Set"
-# )
-
