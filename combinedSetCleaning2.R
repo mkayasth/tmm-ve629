@@ -199,8 +199,8 @@ metadata_combined <- metadata_combined %>%
 ### Data split.
 Strata <- interaction(metadata_combined$Cohort, metadata_combined$TMM)
 
-set.seed(40) # For reproducibility83, 41, 17.
-train_indices <- createDataPartition(Strata, p = 0.70, list = FALSE)
+set.seed(29) # For reproducibility83, 41, 17.
+train_indices <- createDataPartition(Strata, p = 0.60, list = FALSE)
 
 # training and testing set.
 train_metadata <- metadata_combined[train_indices, ]
@@ -407,7 +407,7 @@ stability_metrics <- all_seed_data %>%
 p2 <- ggplot(stability_metrics, aes(x = seeds_present_in_top, y = mean_accuracy)) +
   geom_jitter(width = 0.2, alpha = 0.5, color = "#2E86AB") +
   geom_text_repel(
-    data = subset(stability_metrics, seeds_present_in_top >= 7),
+    data = subset(stability_metrics, seeds_present_in_top >= 6),
     aes(label = gene),
     size = 4.5,
     max.overlaps = 20
@@ -422,8 +422,8 @@ p2 <- ggplot(stability_metrics, aes(x = seeds_present_in_top, y = mean_accuracy)
   ) +
   theme_classic() +
   theme(
-    axis.title.x = element_text(size = 16, face = "bold"),
-    axis.title.y = element_text(size = 16, face = "bold"),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
     axis.text.x  = element_text(size = 14),
     axis.text.y  = element_text(size = 14)
   )
@@ -522,9 +522,9 @@ p5 <- ggplot(stability_metrics2, aes(x = seeds_present_in_top, y = mean_accuracy
   ) +
   theme_classic() +
   theme(
-    plot.title   = element_text(size = 18, face = "bold", hjust = 0.5),
-    axis.title.x = element_text(size = 16, face = "bold"),
-    axis.title.y = element_text(size = 16, face = "bold"),
+    plot.title   = element_text(size = 18, hjust = 0.5),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
     axis.text.x  = element_text(size = 12),
     axis.text.y  = element_text(size = 12)
   )
@@ -569,12 +569,12 @@ tmm_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_tot
                                                     n_folds = 3 , n_repeats = 5,
                                                     n_cores = 8,
                                                     max_genes = 15,
-                                                    pivot_genes = c(PLCXD1 = "DOWN", DDX39A = "DOWN",
-                                                                    CAB39L = "UP"),
-                                                    n_pivots    = 3L,
+                                                    pivot_genes = c(MFSD6 = "UP", ZNF511 = "DOWN",
+                                                                    XRCC3 = "DOWN", WDR47 = "UP", SUV39H1 = "DOWN"),
+                                                    n_pivots    = 5L,
                                                     lcb_conf   = 0.95,
                                                     lcb_boot_R = 500,
-                                                    perm_R  = 200)
+                                                    perm_R  = 0)
 save.image()
 
 alt_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_total = train_metadata,
@@ -588,12 +588,12 @@ alt_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_tot
                                                      n_folds = 3 , n_repeats = 5,
                                                      n_cores = 8,
                                                      max_genes = 15,
-                                                     pivot_genes = c(TADA3 = "DOWN", LMNTD2 = "UP",
-                                                                     COL22A1 = "UP"),
-                                                     n_pivots    = 3L,
+                                                     pivot_genes = c(SLCO1A2 = "UP", BBOX-AS1 = "UP",
+                                                                     CCNB3 = "UP", BBOX1 = "UP", SLC5A12 = "UP"),
+                                                     n_pivots    = 5L,
                                                      lcb_conf   = 0.95,
                                                      lcb_boot_R = 500,
-                                                     perm_R  = 200)
+                                                     perm_R  = 00)
 
 save.image()
 
@@ -611,10 +611,10 @@ importance_list <- list()
 
 
 sample_sizes <- c(
-  "NO_TMM" = 12,
-  "ALT"    = 6,
-  "Telomerase-Amplified" = 6,
-  "Telomerase-NotAmplified" = 6
+  "NO_TMM" = 10,
+  "ALT"    = 10,
+  "Telomerase-Amplified" = 5,
+  "Telomerase-NotAmplified" = 5
 )
 
 candidate_genes_tmm_combined_up <- candidate_genes_tmm_combined_up[candidate_genes_tmm_combined_up %in% rownames(lcpm)]
@@ -642,7 +642,7 @@ for (i in seq_along(seeds)) {
 all_seed_data <- bind_rows(importance_list)
 
 # Summarize metrics across all seeds
-stability_metrics <- all_seed_data %>%
+stability_metrics3 <- all_seed_data %>%
   group_by(gene) %>%
   summarise(
     # Core Averages
@@ -657,13 +657,13 @@ stability_metrics <- all_seed_data %>%
     avg_rank_in_Gini_in_seeds = mean(rank_in_Gini)
   ) %>%
   # Quality filter: must have positive importance and valid contribution.
-  filter(mean_no_tmm > 0, mean_tmm > 0, mean_accuracy > quantile(mean_accuracy, 0.50)) %>%
-  arrange(desc(mean_accuracy)) %>%
-  mutate(gene_index = row_number())
+  filter(mean_no_tmm > 0, mean_tmm > 0, mean_accuracy > 0, mean_gini > 0) %>%
+  arrange(avg_accuracy_rank_in_seeds)
+#mutate(gene_index = row_number())
 
 
 # Visualization: Stability vs. Magnitude
-p7 <- ggplot(stability_metrics, aes(x = seeds_present_in_top, y = mean_accuracy)) +
+p7 <- ggplot(stability_metrics3, aes(x = seeds_present_in_top, y = mean_accuracy)) +
   geom_jitter(width = 0.2, alpha = 0.5, color = "#2E86AB") +
   geom_text_repel(
     data = subset(stability_metrics, seeds_present_in_top >= 8),
@@ -677,7 +677,7 @@ p7 <- ggplot(stability_metrics, aes(x = seeds_present_in_top, y = mean_accuracy)
       "Times in Top ", top_n_threshold,
       " (out of ", length(seeds), " seeds)"
     ),
-    y = "Average Mean Decrease Accuracy"
+    y = "Average Ranks"
   ) +
   theme_classic() +
   theme(
@@ -688,10 +688,10 @@ p7 <- ggplot(stability_metrics, aes(x = seeds_present_in_top, y = mean_accuracy)
   )
 
 # Top 20 Lollipop Plot
-top_20_tmm <- stability_metrics %>% slice_head(n = 20)
+top_20_tmm <- stability_metrics3 %>% slice_head(n = 20)
 
-p8 <- ggplot(top_20_tmm, aes(x = reorder(gene, mean_accuracy), y = mean_accuracy)) +
-  geom_segment(aes(xend = gene, y = 0, yend = mean_accuracy), linewidth = 0.6) +
+p8 <- ggplot(top_20_tmm, aes(x = reorder(gene, avg_accuracy_rank_in_seeds), y = avg_accuracy_rank_in_seeds)) +
+  geom_segment(aes(xend = gene, y = 0, yend = avg_accuracy_rank_in_seeds), linewidth = 0.6) +
   geom_point(size = 4, color = "#2E86AB") +
   coord_flip() +
   labs(title = "Top 20 Pivot Genes (Averaged)", x = NULL, y = "Mean Decrease Accuracy") +
@@ -708,10 +708,10 @@ importance_list <- list()
 
 
 sample_sizes <- c(
-  "NO_TMM" = 6,
-  "ALT"    = 12,
-  "Telomerase-Amplified" = 6,
-  "Telomerase-NotAmplified" = 6
+  "NO_TMM" = 10,
+  "ALT"    = 10,
+  "Telomerase-Amplified" = 5,
+  "Telomerase-NotAmplified" = 5
 )
 
 candidate_genes_alt_combined_up <- candidate_genes_alt_combined_up[candidate_genes_alt_combined_up %in% rownames(lcpm)]
@@ -739,7 +739,7 @@ for (i in seq_along(seeds)) {
 all_seed_data2 <- bind_rows(importance_list)
 
 # Summarize metrics across all seeds
-stability_metrics2 <- all_seed_data2 %>%
+stability_metrics4 <- all_seed_data2 %>%
   group_by(gene) %>%
   summarise(
     # Core Averages
@@ -754,16 +754,14 @@ stability_metrics2 <- all_seed_data2 %>%
     avg_Gini_rank_in_seeds = mean(rank_in_Gini)
   ) %>%
   # Quality filter: must have positive importance and valid contribution.
-  filter(mean_alt > 0, mean_nonalt > 0, mean_accuracy > quantile(mean_accuracy, 0.50)) %>%
-  arrange(desc(mean_accuracy)) %>%
-  mutate(gene_index = row_number())
-
+  filter(mean_alt > 0, mean_nonalt > 0, mean_accuracy > 0, mean_gini > 0) %>%
+  arrange(avg_accuracy_rank_in_seeds)
 
 # Visualization: Stability vs. Magnitude
-p9 <- ggplot(stability_metrics2, aes(x = seeds_present_in_top, y = mean_accuracy)) +
+p9 <- ggplot(stability_metrics4, aes(x = seeds_present_in_top, y = mean_accuracy)) +
   geom_jitter(width = 0.2, alpha = 0.5, color = "#2E86AB") +
   geom_text_repel(
-    data = subset(stability_metrics2, seeds_present_in_top >= 10),
+    data = subset(stability_metrics2, seeds_present_in_top >= 9),
     aes(label = gene),
     size = 4.5,
     max.overlaps = 20
@@ -786,13 +784,13 @@ p9 <- ggplot(stability_metrics2, aes(x = seeds_present_in_top, y = mean_accuracy
   )
 
 # Top 20 Lollipop Plot
-top_20_alt <- stability_metrics2 %>% slice_head(n = 20)
+top_20_alt <- stability_metrics4 %>% slice_head(n = 20)
 
-p10 <- ggplot(top_20_alt, aes(x = reorder(gene, mean_accuracy), y = mean_accuracy)) +
-  geom_segment(aes(xend = gene, y = 0, yend = mean_accuracy), linewidth = 0.6) +
+p10 <- ggplot(top_20_alt, aes(x = reorder(gene, avg_accuracy_rank_in_seeds), y = avg_accuracy_rank_in_seeds)) +
+  geom_segment(aes(xend = gene, y = 0, yend = avg_accuracy_rank_in_seeds), linewidth = 0.6) +
   geom_point(size = 4, color = "#2E86AB") +
   coord_flip() +
-  labs(title = "Top 20 Pivot Genes (Averaged)", x = NULL, y = "Mean Decrease Accuracy") +
+  labs(title = "Top 20 Pivot Genes (Averaged)", x = NULL, y = "Averaged Gene Ranks") +
   theme_classic()
 
 print(p9)
