@@ -50,20 +50,24 @@ plot_gene <- function(gene){
     theme_classic(base_size = 12) +
     theme(
       legend.position = "none",
-      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.title = element_text(hjust = 0.5),
       strip.background = element_blank(),
-      strip.text = element_text(face = "bold")
-    )
+      strip.text = element_text(),
+      axis.text.x = element_text(
+        angle = 45,
+        hjust = 1,
+        vjust = 1
+    ))
 }
 
 # Producing one plot per gene
-plots <- lapply(c("MFSD6", "ZNF511", "XRCC3", "WDR47", "SUV39H1", "SLCO1A2", "BBOX1-AS1", "SLC5A12", "CCNB3", "BBOX1"), plot_gene)
+plots <- lapply(c("SUV39H1", "FMO5", "KCTD21", "TRPM3", "CAB39L", "RFC2", "LMNTD2", "LINC01783", "CCNB3", "OR56A3", "BBOX1-AS1"), plot_gene)
 
 
 cairo_pdf(
   "Pivot_Genes_Boxplots.pdf",
-  width = 12,
-  height = ceiling(length(plots) / 2) * 3
+  width = 15,
+  height = ceiling(length(plots)) * 3
 )
 
 wrap_plots(plots, ncol = 2)

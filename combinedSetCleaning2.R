@@ -199,7 +199,7 @@ metadata_combined <- metadata_combined %>%
 ### Data split.
 Strata <- interaction(metadata_combined$Cohort, metadata_combined$TMM)
 
-set.seed(29) # For reproducibility83, 41, 17.
+set.seed(17) # For reproducibility83, 41, 17.
 train_indices <- createDataPartition(Strata, p = 0.60, list = FALSE)
 
 # training and testing set.
@@ -556,6 +556,24 @@ stability_metrics[stability_metrics$gene %in% candidate_genes_tmm_combined_up, ]
 candidate_genes_tmm_combined_down <- candidate_genes_tmm_combined_down[candidate_genes_tmm_combined_down %in% stability_metrics$gene]
 stability_metrics[stability_metrics$gene %in% candidate_genes_tmm_combined_down, ]
 
+#####################
+
+stability_metrics$combined_rank <- (
+  2 * stability_metrics$avg_accuracy_rank_in_seeds +
+    stability_metrics$avg_rank_in_Gini_in_seeds
+) / 3
+stability_metrics <- stability_metrics %>%
+  arrange((combined_rank))
+
+stability_metrics2$combined_rank <- (
+  2 * stability_metrics2$avg_accuracy_rank_in_seeds +
+    stability_metrics2$avg_Gini_rank_in_seeds
+) / 3
+stability_metrics2 <- stability_metrics2 %>%
+  arrange((combined_rank))
+
+
+
 #########
 
 tmm_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_total = train_metadata,
@@ -569,9 +587,9 @@ tmm_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_tot
                                                     n_folds = 3 , n_repeats = 5,
                                                     n_cores = 8,
                                                     max_genes = 15,
-                                                    pivot_genes = c(MFSD6 = "UP", ZNF511 = "DOWN",
-                                                                    XRCC3 = "DOWN", WDR47 = "UP", SUV39H1 = "DOWN"),
-                                                    n_pivots    = 5L,
+                                                    pivot_genes = c(SUV39H1 = "DOWN", FMO5 = "UP",
+                                                                    KCTD21 = "UP", CAB39L = "UP"),
+                                                    n_pivots    = 4L,
                                                     lcb_conf   = 0.95,
                                                     lcb_boot_R = 500,
                                                     perm_R  = 0)
@@ -588,9 +606,9 @@ alt_signature <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_tot
                                                      n_folds = 3 , n_repeats = 5,
                                                      n_cores = 8,
                                                      max_genes = 15,
-                                                     pivot_genes = c(SLCO1A2 = "UP", BBOX-AS1 = "UP",
-                                                                     CCNB3 = "UP", BBOX1 = "UP", SLC5A12 = "UP"),
-                                                     n_pivots    = 5L,
+                                                     pivot_genes = c(LMNTD2 = "UP", LINC01783 = "UP",
+                                                                     CCNB3 = "UP", OR56A3 = "UP"),
+                                                     n_pivots    = 4L,
                                                      lcb_conf   = 0.95,
                                                      lcb_boot_R = 500,
                                                      perm_R  = 00)
@@ -807,12 +825,12 @@ tmm_signature2 <- run_harmonic_cv_selection_singscore(expr_total = lcpm, meta_to
                                                      n_folds = 3 , n_repeats = 5,
                                                      n_cores = 8,
                                                      max_genes = 15,
-                                                     pivot_genes = c(CAB39L = "UP", FMO5 = "UP",
-                                                                     KCTD21 = "UP", FAXDC2 = "UP"),
+                                                     pivot_genes = c(SUV39H1 = "DOWN", FMO5 = "UP",
+                                                                     KCTD21 = "UP", CAB39L = "UP"),
                                                      n_pivots    = 4L,
                                                      lcb_conf   = 0.95,
                                                      lcb_boot_R = 500,
-                                                     perm_R  = 200)
+                                                     perm_R  = 0)
 
 save.image()
 
