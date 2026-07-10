@@ -228,10 +228,10 @@ df_0532$FDR[df_0532$FDR == 0] <- .Machine$double.xmin
 # Creating the ranking vectors: -log10(P) * sign(logFC)
 # Higher score = Stronger TMM-ve signal
 # Lower score  = Stronger TMM+ signal
-rank_0532 <- -log10(df_0532$FDR) * sign(df_0532$logFC)
+rank_0532 <- df_0532$logFC * sqrt(pmax(df_0532$F, 0))
 names(rank_0532) <- rownames(df_0532)
 
-rank_target <- -log10(df_target$FDR) * sign(df_target$logFC)
+rank_target <- df_target$logFC * sqrt(pmax(df_target$F, 0))
 names(rank_target) <- rownames(df_target)
 
 # Aligning the gene sets (RRHO requires identical gene lists)
@@ -284,10 +284,10 @@ df_0532 <- as.data.frame(top_ALT_train_0532)
 # Creating the ranking vectors: -log10(P) * sign(logFC)
 # Higher score = Stronger TMM-ve signal
 # Lower score  = Stronger TMM+ signal
-rank_0532 <- -log10(df_0532$FDR) * sign(df_0532$logFC)
+rank_0532 <- df_0532$logFC * sqrt(pmax(df_0532$F, 0))
 names(rank_0532) <- rownames(df_0532)
 
-rank_target <- -log10(df_target$FDR) * sign(df_target$logFC)
+rank_target <- df_target$logFC * sqrt(pmax(df_target$F, 0))
 names(rank_target) <- rownames(df_target)
 
 # Aligning the gene sets (RRHO requires identical gene lists)

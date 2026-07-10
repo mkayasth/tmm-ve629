@@ -61,7 +61,7 @@ plot_gene <- function(gene){
 }
 
 # Producing one plot per gene
-plots <- lapply(c("SUV39H1", "FMO5", "KCTD21", "TRPM3", "CAB39L", "RFC2", "LMNTD2", "LINC01783", "CCNB3", "OR56A3", "BBOX1-AS1"), plot_gene)
+plots <- lapply(c("SUV39H1", "FMO5", "PLCXD1", "KCTD21", "CAB39L", "ADRA1A", "OR56A3"), plot_gene)
 
 
 cairo_pdf(
@@ -74,3 +74,88 @@ wrap_plots(plots, ncol = 2)
 
 dev.off()
 
+##################################################################################
+
+# AUC calculator.
+
+library(singscore)
+library(pROC)
+
+calc_singscore_auc <- function(expr_mat,
+                               metadata,
+                               group_col,
+                               positive_group,
+                               negative_group,
+                               up_genes,
+                               down_genes = NULL,
+                               centerScore = TRUE) {
+  
+  ## Keep only the two groups
+  keep <- metadata[[group_col]] %in% c(positive_group, negative_group)
+  
+  expr_sub <- expr_mat[, keep, drop = FALSE]
+  meta_sub <- metadata[keep, , drop = FALSE]
+  
+  ## Rank genes
+  ranked <- rankGenes(as.matrix(expr_sub))
+  
+  ## Calculate singscore
+  if (is.null(down_genes)) {
+    scores <- simpleScore(
+      rankData = ranked,
+      upSet = up_genes,
+      centerScore = centerScore
+    )$TotalScore
+  } else {
+    scores <- simpleScore(
+      rankData = ranked,
+      upSet = up_genes,
+      downSet = down_genes,
+      centerScore = centerScore
+    )$TotalScore
+  }
+  
+  ## Binary outcome
+  response <- factor(
+    meta_sub[[group_col]],
+    levels = c(negative_group, positive_group)
+  )
+  
+  ## ROC/AUC
+  roc_obj <- roc(
+    response = response,
+    predictor = scores,
+    levels = c(negative_group, positive_group),
+    direction = "<",
+    quiet = TRUE
+  )
+  
+  list(
+    auc = as.numeric(auc(roc_obj)),
+    roc = roc_obj,
+    scores = scores
+  )
+}
+
+res <- calc_singscore_auc(
+  expr_mat = lcpm_test,
+  metadata = test_metadata,
+  group_col = "TMM_Case",
+  positive_group = "NO_TMM",
+  negative_group = "TMM",
+  up_genes = c("FMO5", "KCTD21", "CAB39L", "PLXNA4", "WSPAR", "HECW2", "PRSS51", "BLCAP", "ARHGAP21", "GRHL2", "RAPGEF5", "LINC00987"),
+  down_genes = c("SUV39H1", "PLCXD1", "GALK1", "LINC01163")
+)
+
+res$auc
+
+res_alt2 <- calc_singscore_auc(
+  expr_mat = lcpm_test,
+  metadata = test_metadata,
+  group_col = "ALT_Case",
+  positive_group = "ALT",
+  negative_group = "Non-ALT",
+  up_genes = c("LMNTD2", "LINC01783", "CCNB3", "OR56A3", "DNAJB13"),
+  down_genes = c("ADRA1A", "TERT"))
+
+res_alt2$auc

@@ -134,6 +134,38 @@ run_harmonic_cv_selection_singscore <- function(expr_total, meta_total,
     setNames(scores$TotalScore, rownames(scores))
   }
   
+  # ── NEW HELPER: single-gene AUC on an arbitrary expr/meta pair ---------------
+  # Computes the (direction-corrected) AUC of ONE gene's singscore against
+  # each dynamically-derived comparison group, evaluated on the FULL supplied
+  # dataset (no CV / no bootstrap) — used purely to report each pivot gene's
+  # individual discriminative strength. Works for training OR any test set,
+  # since expr/meta are passed in explicitly.
+  single_gene_auc_on <- function(gene, direction, expr, meta) {
+    up_g   <- if (direction == "UP")   gene else character(0)
+    down_g <- if (direction == "DOWN") gene else character(0)
+    scores <- singscore_score(up_g, down_g, expr)
+    
+    vapply(comparison_keys, function(grp_key) {
+      target_grp <- comparisons[[grp_key]]
+      grp_rows   <- which(meta[[phenotype_col]] %in% c(label_neg, target_grp))
+      if (length(grp_rows) < 2 ||
+          length(unique(meta[[phenotype_col]][grp_rows])) < 2) return(NA_real_)
+      
+      grp_ids    <- meta$SampleID[grp_rows]
+      grp_scores <- scores[grp_ids]
+      grp_labels <- ifelse(meta[[phenotype_col]][grp_rows] == label_neg, 0L, 1L)
+      
+      roc_obj <- pROC::roc(grp_labels, grp_scores, quiet = TRUE)
+      auc_raw <- as.numeric(pROC::auc(roc_obj))
+      max(auc_raw, 1 - auc_raw)
+    }, FUN.VALUE = numeric(1))
+  }
+  
+  # Convenience wrapper: single-gene AUC on the TRAINING set specifically.
+  single_gene_auc <- function(gene, direction) {
+    single_gene_auc_on(gene, direction, expr_total, meta_total)
+  }
+  
   harmonic_mean <- function(x) {
     x <- x[!is.na(x) & is.finite(x)]
     if (length(x) == 0 || any(x <= 0)) return(0)
@@ -222,7 +254,7 @@ run_harmonic_cv_selection_singscore <- function(expr_total, meta_total,
   
   # ── Parse pivot_genes (named char vector: c(GENE1="UP", GENE2="DOWN")) -------
   n_pivots <- as.integer(n_pivots)
-  stopifnot(n_pivots >= 1L, n_pivots <= 10L)
+ # stopifnot(n_pivots >= 1L, n_pivots <= 10L)
   
   parse_pivot_genes <- function(pivot_genes, pool_up, pool_down, n_pivots) {
     if (is.null(pivot_genes) || length(pivot_genes) == 0)
@@ -352,6 +384,49 @@ run_harmonic_cv_selection_singscore <- function(expr_total, meta_total,
     if (length(selected_down) > 0) paste(selected_down, collapse = ", ") else "(none)"
   ))
   
+  # ── NEW: Per-gene AUC for every pivot gene (explicit + auto), on TRAIN and
+  #        on every provided TEST set --------------------------------------
+  # Reports each individual pivot gene's own (direction-corrected) AUC against
+  # every comparison group, computed on the full training set AND on each
+  # test set (if any were provided). This is purely descriptive/diagnostic —
+  # it does not affect selection, which still runs on HM-LCB as before.
+  # Structure of pivot_gene_auc[[gene]]:
+  #   $train        -> named vector, AUC per comparison group on expr_total
+  #   $test[[ts]]   -> named vector, AUC per comparison group on that test set
+  pivot_gene_auc  <- list()
+  all_pivot_genes <- c(selected_up, selected_down)
+  all_pivot_dirs  <- c(rep("UP", length(selected_up)), rep("DOWN", length(selected_down)))
+  
+  if (length(all_pivot_genes) > 0) {
+    message("\n[PIVOT] Single-gene AUC (per comparison group):")
+    for (k in seq_along(all_pivot_genes)) {
+      g_auc_train <- single_gene_auc(all_pivot_genes[k], all_pivot_dirs[k])
+      
+      g_auc_test <- list()
+      if (has_test_sets) {
+        for (ts in test_set_names) {
+          g_auc_test[[ts]] <- single_gene_auc_on(all_pivot_genes[k], all_pivot_dirs[k],
+                                                 expr_test_list[[ts]], meta_test_list[[ts]])
+        }
+      }
+      
+      pivot_gene_auc[[all_pivot_genes[k]]] <- list(train = g_auc_train, test = g_auc_test)
+      
+      train_str <- paste(sprintf("%s=%.4f", names(g_auc_train), g_auc_train), collapse = "  |  ")
+      message(sprintf("         %-20s (%-4s)  TRAIN      ->  %s",
+                      all_pivot_genes[k], all_pivot_dirs[k], train_str))
+      
+      if (has_test_sets) {
+        for (ts in test_set_names) {
+          te_auc <- g_auc_test[[ts]]
+          te_str <- paste(sprintf("%s=%.4f", names(te_auc), te_auc), collapse = "  |  ")
+          message(sprintf("         %-20s        TEST[%-10s] ->  %s",
+                          "", ts, te_str))
+        }
+      }
+    }
+  }
+  
   # ── Build history data frame with dynamic column names ----------------------
   # Per-comparison-group train columns: lcb_<key>, sd_<key>
   # Per-comparison-group test columns (per test set): <ts>_auc_<key>, <ts>_sd_<key>, <ts>_pval_<key>
@@ -372,9 +447,22 @@ run_harmonic_cv_selection_singscore <- function(expr_total, meta_total,
       test_hm_cols <- test_hmp_cols <- character(0)
   }
   
+  # NEW: per-comparison-group single-gene AUC columns (only meaningful on
+  # pivot-gene rows; NA for genes added during greedy expansion)
+  pivot_auc_cols <- paste0("pivot_auc_", comparison_keys)   # single-gene AUC on TRAIN
+  
+  # NEW: single-gene AUC on each provided TEST set (pivot-gene rows only)
+  if (has_test_sets) {
+    pivot_test_auc_cols <- as.vector(outer(test_set_names, comparison_keys,
+                                           function(ts, ck) paste0("pivot_", ts, "_auc_", ck)))
+  } else {
+    pivot_test_auc_cols <- character(0)
+  }
+  
   fixed_cols <- c("size", "gene_added", "direction", "hm_lcb", "sd_pooled", "method")
   all_cols   <- c(fixed_cols,
                   train_lcb_cols, train_sd_cols,
+                  pivot_auc_cols, pivot_test_auc_cols,
                   test_hm_cols,   test_auc_cols,
                   test_sd_cols_h, test_pval_cols, test_hmp_cols)
   
@@ -396,6 +484,25 @@ run_harmonic_cv_selection_singscore <- function(expr_total, meta_total,
     history[k, "gene_added"] <- all_pivots[k]
     history[k, "direction"]  <- all_piv_dirs[k]
     history[k, "method"]     <- if (k <= n_explicit_pivots) "USER-PIVOT" else "AUTO-PIVOT"
+    
+    # NEW: write single-gene AUC values into the pivot_auc_<key> (train) and
+    # pivot_<ts>_auc_<key> (per test set) columns
+    g_auc_entry <- pivot_gene_auc[[all_pivots[k]]]
+    if (!is.null(g_auc_entry)) {
+      for (ck in comparison_keys) {
+        history[k, paste0("pivot_auc_", ck)] <- g_auc_entry$train[ck]
+      }
+      if (has_test_sets) {
+        for (ts in test_set_names) {
+          te_auc <- g_auc_entry$test[[ts]]
+          if (!is.null(te_auc)) {
+            for (ck in comparison_keys) {
+              history[k, paste0("pivot_", ts, "_auc_", ck)] <- te_auc[ck]
+            }
+          }
+        }
+      }
+    }
   }
   
   # ── Test-set evaluation helper (operates over all test sets) ----------------
@@ -486,6 +593,14 @@ run_harmonic_cv_selection_singscore <- function(expr_total, meta_total,
     if (length(cand_list) == 0) { message("[WARN] No candidates left."); break }
     candidates <- do.call(rbind, cand_list)
     
+    # ── Baseline: per-group LCBs of the CURRENT selected gene set (before
+    #    adding a new gene this step) — used to identify the worst-performing
+    #    phenotype so ties can be broken in its favour below.
+    baseline_lcbs <- run_cv(selected_up, selected_down)
+    worst_key     <- comparison_keys[which.min(baseline_lcbs)]
+    message(sprintf("     Baseline worst-performing phenotype: %-20s (LCB: %0.4f)",
+                    worst_key, baseline_lcbs[worst_key]))
+    
     iter_results <- lapply(seq_len(nrow(candidates)), function(ci) {
       cand_gene  <- candidates$gene[ci]
       cand_dir   <- candidates$direction[ci]
@@ -566,17 +681,21 @@ run_harmonic_cv_selection_singscore <- function(expr_total, meta_total,
       base
     }))
     
-    # ── Dual-criterion selection: LCB-first, SD-minimisation on saturation ------
+    # ── Dual-criterion selection: LCB-first, worst-phenotype-improvement on saturation ------
     max_lcb     <- max(res_df$hm_lcb, na.rm = TRUE)
     saturated   <- (max_lcb - res_df$hm_lcb) <= lcb_tol   # candidates within tol of best
     
     if (sum(saturated, na.rm = TRUE) > 1L) {
-      # All saturated candidates have indistinguishably high LCB:
-      # break the tie by minimising pooled SD across all folds and groups.
+      # Multiple candidates have an indistinguishably high (saturated) overall
+      # HM-LCB — i.e. they have the same effect on the AUC. Break the tie by
+      # picking whichever candidate improves the CURRENT worst-performing
+      # phenotype (identified from baseline_lcbs, above) the most.
       sat_df    <- res_df[saturated, , drop = FALSE]
-      best_idx  <- which(saturated)[which.min(sat_df$sd_pooled)]
-      selection_criterion <- sprintf("SD-MIN (%.0f candidates saturated within lcb_tol=%.4f)",
-                                     sum(saturated), lcb_tol)
+      worst_col <- paste0("lcb_", worst_key)
+      best_idx  <- which(saturated)[which.max(sat_df[[worst_col]])]
+      selection_criterion <- sprintf(
+        "WORST-PHENOTYPE-MAX (%.0f candidates saturated within lcb_tol=%.4f; worst phenotype: %s, baseline LCB: %.4f)",
+        sum(saturated), lcb_tol, worst_key, baseline_lcbs[worst_key])
     } else {
       best_idx  <- which.max(res_df$hm_lcb)
       selection_criterion <- "HM-LCB-MAX"
@@ -673,6 +792,8 @@ run_harmonic_cv_selection_singscore <- function(expr_total, meta_total,
       setNames(rep("UP",   length(selected_up)),   selected_up),
       setNames(rep("DOWN", length(selected_down)), selected_down)
     )[seq_len(min(length(selected_up) + length(selected_down), n_pivots))],
+    pivot_gene_auc   = pivot_gene_auc,   # NEW: named list per pivot gene; each entry has
+    #      $train (AUC vector) and $test[[ts]] (AUC vector per test set)
     final_genes_up   = selected_up,
     final_genes_down = selected_down,
     comparisons      = comparisons,   # the dynamic key -> phenotype_value map
