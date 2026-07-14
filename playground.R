@@ -1,3 +1,5 @@
+### Content: pivot gene visualization, auc calculator for signatures, line graph for random forest.
+
 ## seeing if pivot genes work across training and testing.
 
 library(tidyverse)
@@ -130,13 +132,31 @@ calc_singscore_auc <- function(expr_mat,
     quiet = TRUE
   )
   
+  ## Cohen's d
+  score_df <- data.frame(
+    Score = scores,
+    Group = response
+  )
+  
+  d <- effsize::cohen.d(
+    Score ~ Group,
+    data = score_df,
+    hedges.correction = TRUE
+  )$estimate
+  
+  ## Distribution overlap
+  overlap <- 2 * pnorm(-abs(d) / 2)
+  
   list(
     auc = as.numeric(auc(roc_obj)),
     roc = roc_obj,
-    scores = scores
+    scores = scores,
+    cohens_d = unname(d),
+    overlap = overlap
   )
 }
 
+############## Testing set.
 res <- calc_singscore_auc(
   expr_mat = lcpm_test,
   metadata = test_metadata,
@@ -148,8 +168,9 @@ res <- calc_singscore_auc(
 )
 
 res$auc
+res$overlap
 
-res_alt2 <- calc_singscore_auc(
+res_alt <- calc_singscore_auc(
   expr_mat = lcpm_test,
   metadata = test_metadata,
   group_col = "ALT_Case",
@@ -158,8 +179,135 @@ res_alt2 <- calc_singscore_auc(
   up_genes = c("LMNTD2", "LINC01783", "CCNB3", "OR56A3", "DNAJB13"),
   down_genes = c("ADRA1A", "TERT"))
 
-res_alt2$auc
+res_alt$auc
+res_alt$overlap
 
+### Upregulated signatures -- TMM-ve.
+
+res_up <- calc_singscore_auc(
+  expr_mat = lcpm_test,
+  metadata = test_metadata,
+  group_col = "TMM_Case",
+  positive_group = "NO_TMM",
+  negative_group = "TMM",
+  up_genes = c("FMO5", "KCTD21", "FAXDC2", "CAB39L", "MYORG", "FLRT3", "SLA")
+)
+
+res_up$auc
+res_up$overlap
+
+
+res_up_alt <- calc_singscore_auc(
+  expr_mat = lcpm_test,
+  metadata = test_metadata,
+  group_col = "ALT_Case",
+  positive_group = "ALT",
+  negative_group = "Non-ALT",
+  up_genes = c("LMNTD2", "LINC01783", "CCNB3", "OR56A3", "SLCO1A2", "SCARA5", "PLK3", "DCAF8L1", "F8"))
+
+res_up_alt$auc
+res_up_alt$overlap
+############## Training set.
+res2 <- calc_singscore_auc(
+  expr_mat = lcpm,
+  metadata = train_metadata,
+  group_col = "TMM_Case",
+  positive_group = "NO_TMM",
+  negative_group = "TMM",
+  up_genes = c("FMO5", "KCTD21", "CAB39L", "PLXNA4", "WSPAR", "HECW2", "PRSS51", "BLCAP", "ARHGAP21", "GRHL2", "RAPGEF5", "LINC00987"),
+  down_genes = c("SUV39H1", "PLCXD1", "GALK1", "LINC01163")
+)
+
+res2$auc
+res2$overlap
+
+res_alt2 <- calc_singscore_auc(
+  expr_mat = lcpm,
+  metadata = train_metadata,
+  group_col = "ALT_Case",
+  positive_group = "ALT",
+  negative_group = "Non-ALT",
+  up_genes = c("LMNTD2", "LINC01783", "CCNB3", "OR56A3", "DNAJB13"),
+  down_genes = c("ADRA1A", "TERT"))
+
+res_alt2$auc
+res_alt2$overlap
+
+### Upregulated signatures.
+
+res_up2 <- calc_singscore_auc(
+  expr_mat = lcpm,
+  metadata = train_metadata,
+  group_col = "TMM_Case",
+  positive_group = "NO_TMM",
+  negative_group = "TMM",
+  up_genes = c("FMO5", "KCTD21", "FAXDC2", "CAB39L", "MYORG", "FLRT3", "SLA")
+)
+
+res_up2$auc
+res_up2$overlap
+
+res_up_alt2 <- calc_singscore_auc(
+  expr_mat = lcpm,
+  metadata = train_metadata,
+  group_col = "ALT_Case",
+  positive_group = "ALT",
+  negative_group = "Non-ALT",
+  up_genes = c("LMNTD2", "LINC01783", "CCNB3", "OR56A3", "SLCO1A2", "SCARA5", "PLK3", "DCAF8L1", "F8"))
+
+res_up_alt2$auc
+res_up_alt2$overlap
+
+################### Ackerman dataset.
+res3 <- calc_singscore_auc(
+  expr_mat = expr_ackerman,
+  metadata = metadata_ackerman,
+  group_col = "TMM_Case",
+  positive_group = "NO_TMM",
+  negative_group = "TMM",
+  up_genes = c("FMO5", "KCTD21", "CAB39L", "PLXNA4", "HECW2",  "BLCAP", "ARHGAP21", "GRHL2", "RAPGEF5"),
+  down_genes = c("SUV39H1", "PLCXD1", "GALK1")
+)
+
+res3$auc
+res3$overlap
+
+res_alt3 <- calc_singscore_auc(
+  expr_mat = expr_ackerman,
+  metadata = metadata_ackerman,
+  group_col = "ALT_Case",
+  positive_group = "ALT",
+  negative_group = "Non-ALT",
+  up_genes = c("LMNTD2", "LINC01783", "CCNB3", "OR56A3", "DNAJB13"),
+  down_genes = c("ADRA1A", "TERT"))
+
+res_alt3$auc
+res_alt3$overlap
+
+### Upregulated signatures.
+
+res_up3 <- calc_singscore_auc(
+  expr_mat = expr_ackerman,
+  metadata = metadata_ackerman,
+  group_col = "TMM_Case",
+  positive_group = "NO_TMM",
+  negative_group = "TMM",
+  up_genes = c("FMO5", "KCTD21", "FAXDC2", "CAB39L", "MYORG", "FLRT3", "SLA")
+)
+
+res_up3$auc
+res_up3$overlap
+
+res_up_alt3 <- calc_singscore_auc(
+  expr_mat = expr_ackerman,
+  metadata = metadata_ackerman,
+  group_col = "ALT_Case",
+  positive_group = "ALT",
+  negative_group = "Non-ALT",
+  up_genes = c("LMNTD2", "LINC01783", "CCNB3", "OR56A3", "SLCO1A2", "SCARA5", "PLK3", "DCAF8L1", "F8"))
+
+res_up_alt3$auc
+res_up_alt3$overlap
 ###################################################################################
 ###################################################################################
 ###################################################################################
